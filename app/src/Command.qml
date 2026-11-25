@@ -62,9 +62,14 @@ Item {
 
     // The key as a button or the help shows it: "⇧ E", "Esc".
     readonly property string keyName: keysText !== "" ? keysText : keys.length > 0 ? KeyNames.nameOf(keys[0]) : ""
-    readonly property bool live: bound && usable && (keyLayer === "any"
-        || (keymap.layer === keyLayer && (keyLayer !== "plugin" || ours()))
-        || (keyLayer === "chrome" && (keymap.layer === "grid" || keymap.layer === "viewer")))
+    readonly property bool live: liveIn(keymap.layer)
+    // Whether its keys would work with `layer` on top: the palette's
+    // question for the layer under it.
+    function liveIn(layer) {
+        return bound && usable && (keyLayer === "any"
+            || (layer === keyLayer && (keyLayer !== "plugin" || ours()))
+            || (keyLayer === "chrome" && (layer === "grid" || layer === "viewer")))
+    }
 
     // The plugin it is in, by the Loader Main.qml loads each in, else by
     // its file; "" for Pinhole's own, or not known yet.

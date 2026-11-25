@@ -58,6 +58,7 @@ HEADERS += \
     $$PWD/timeline.h \
     $$PWD/libraryreloader.h \
     $$PWD/keymap.h \
+    $$PWD/fuzzy.h \
     $$PWD/marks.h \
     $$PWD/markchoices.h \
     $$PWD/storage.h \
@@ -111,6 +112,7 @@ SOURCES += \
     $$PWD/timeline.cpp \
     $$PWD/libraryreloader.cpp \
     $$PWD/keymap.cpp \
+    $$PWD/fuzzy.cpp \
     $$PWD/marks.cpp \
     $$PWD/markchoices.cpp \
     $$PWD/storage.cpp \

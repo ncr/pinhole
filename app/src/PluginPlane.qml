@@ -297,7 +297,9 @@ Item {
                     derived.push([action.key, words])
             }
             if ((item.help && item.help.length > 0) || derived.length > 0)
-                help.push({ plugin: loader.modelData, keys: (item.help ? Array.from(item.help) : []).concat(derived) })
+                help.push({ plugin: loader.modelData, keys: (item.help ? Array.from(item.help) : []).concat(derived),
+                            // Its actions, for the palette to tell their keys' Commands.
+                            actions: item.actions ? Array.from(item.actions) : [] })
             if (item.viewerLayer)
                 layers.push({ plugin: loader.modelData, component: item.viewerLayer })
             // Only the kinds its manifest names (Plugins::at's sources).

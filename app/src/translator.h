@@ -50,6 +50,11 @@ public:
     // A plugin's own words (its manifest's name and description): from its
     // catalog, else as written.
     QString pluginText(const QString &id, const QString &source) const;
+    // The English a text shown is a translation of, in Pinhole's catalog
+    // and the plugins': "Eksportuj JPEG" is "Export JPEG". Empty in
+    // English, or for words no catalog has. For the palette to find a
+    // command by either name.
+    Q_INVOKABLE QStringList sourcesOf(const QString &text) const;
     // Which plugin a qsTr() context is from ("" for Pinhole's own): a file's
     // name, or a plugin's main file's (Plugins gives its URL the id). For
     // tests, and translate().
@@ -84,6 +89,8 @@ private:
     QSet<QString> m_files;
     QList<PluginCatalog> m_plugins;
     QPointer<QQmlEngine> m_engine;
+    // sourcesOf()'s, made the first time it is asked, again after a reload.
+    mutable QHash<QString, QStringList> m_sources;
     QFileSystemWatcher m_watcher;
     QTimer m_debounce;
 };

@@ -189,6 +189,25 @@ QString Translator::pluginText(const QString &id, const QString &source) const {
     return source;
 }
 
+QStringList Translator::sourcesOf(const QString &text) const {
+    if (m_language == QLatin1String("en"))
+        return {};
+    if (m_sources.isEmpty()) {
+        const auto add = [this](const Strings &strings) {
+            for (auto it = strings.cbegin(); it != strings.cend(); ++it)
+                if (it.value().isString() && it.value().toString() != it.key()) {
+                    QStringList &sources = m_sources[it.value().toString()];
+                    if (!sources.contains(it.key()))
+                        sources << it.key();
+                }
+        };
+        add(m_strings);
+        for (const PluginCatalog &plugin : m_plugins)
+            add(plugin.strings);
+    }
+    return m_sources.value(text);
+}
+
 void Translator::setPluginCatalogs(const QList<std::pair<QString, QString>> &plugins) {
     if (plugins == m_pluginDirs)
         return;
@@ -238,6 +257,7 @@ void Translator::reload() {
         return;
 
     m_language = language;
+    m_sources.clear();
     m_strings = read(m_catalogDirectory);
     m_files = filesIn(QStringLiteral(":/"), QDirIterator::NoIteratorFlags);
     m_plugins.clear();

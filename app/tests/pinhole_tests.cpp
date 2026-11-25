@@ -56,6 +56,7 @@
 #include "favourites.h"
 #include "history.h"
 #include "keymap.h"
+#include "fuzzy.h"
 #include "sources.h"
 #include "library.h"
 #include "timeline.h"
@@ -1301,6 +1302,142 @@ printf '%s\n' '{"available":false,"revision":"1234567890"}'
         QCOMPARE(translator.translate("Incoming", "Adding %n file(s) to %1…", nullptr, 1), QString("Dodawanie %n pliku do %1…"));
         QCOMPARE(translator.translate("Incoming", "Added %n file(s) to %1", nullptr, 3), QString("Dodano %n pliki do %1"));
         QCOMPARE(translator.translate("Incoming", "%n file(s) not added", nullptr, 5), QString("Nie dodano %n plików"));
+    }
+
+    // The palette's search (fuzzy.h) on commands as the help lists them in
+    // Polish: each its words, their English, the part it is in, its key.
+    static QVariantList paletteCommands() {
+        const QList<QStringList> commands = {
+            // Polish, English, part, key
+            {"Eksportuj JPEG", "Export JPEG", "Udostępnij", "Ctrl E"},
+            {"Eksportuj oryginał", "Export original", "Udostępnij", "Ctrl ⇧ E"},
+            {"Kopiuj", "Copy", "Udostępnij", "Ctrl C"},
+            {"Zaznacz wszystkie", "Select all", "Tryb zaznaczania", "Ctrl A"},
+            {"Zaznacz zakres", "Tick a range", "Tryb zaznaczania", "⇧ ↑"},
+            {"Cofnij", "Undo", "Pinhole", "Ctrl Z"},
+            {"Ponów", "Redo", "Pinhole", "Ctrl ⇧ Z"},
+            {"Zakończ", "Quit", "Pinhole", "Q"},
+            {"Źródła i ustawienia", "Sources and settings", "Pinhole", "Tab"},
+            {"Najnowsze", "Newest", "Biblioteka", "N"},
+            {"Najstarsze", "Oldest", "Biblioteka", "Home"},
+            {"Przybliż, oddal", "Zoom in, out", "Biblioteka", "+ −"},
+            {"Poprzednie, następne", "Previous, next", "Zdjęcie", "← →"},
+            {"Zrób z niego tło pulpitu", "Make it the desktop background", "Tło", "B"},
+            {"Ruch zdjęcia Live", "A Live Photo's motion", "Tło", "V"},
+            {"Zdjęcia każdego dnia", "Every day's photos", "Kalendarz", "Y"},
+            {"Kadruj zdjęcie", "Crop the photo", "Edycja", "K"},
+            {"Obróć zdjęcie o ćwierć obrotu; ⇧ R z powrotem", "Turn the photo a quarter; ⇧ R back", "Edycja", "R"},
+            {"Ulubione", "Favourite", "Ulubione", "F"},
+            {"Przeglądaj zdjęcia na mapie", "Browse photos on the map", "Informacje", "M"},
+            {"Szczegóły zdjęcia", "A photo's details", "Informacje", "I"},
+            {"Mozaika ze zdjęcia", "A mosaic of the photo", "Mozaika", "H"},
+            {"Mozaika: większe, mniejsze kafelki", "Mosaic: bigger, smaller tiles", "Mozaika", "+ −"},
+            {"Osoby", "People", "Osoby", "⇧ F"},
+            {"Kto jest na pokazanym zdjęciu", "Who is in the photo shown", "Osoby", "W"},
+            {"Tęczowa ściana", "Rainbow wall", "Ściana", "W"},
+            {"Od tego zdjęcia", "From this photo on", "Ramka", "P"},
+            {"Ten dzień we wcześniejszych latach", "On this day, in earlier years", "Tego dnia", "D"},
+            {"Klawisze i gesty", "Keys and gestures", "Pinhole", "?"},
+        };
+        QVariantList list;
+        for (const QStringList &c : commands)
+            list << QVariantMap{{"names", QVariantList{QVariantList{c[0], 100}, QVariantList{c[1], 100}, QVariantList{c[2], 80}}},
+                                {"keys", QStringList{c[3]}}};
+        return list;
+    }
+    static QString firstFound(const QString &query) {
+        const QVariantList commands = paletteCommands();
+        const QVariantList order = Fuzzy().rank(query, commands);
+        if (order.isEmpty())
+            return {};
+        return commands.at(order.first().toInt()).toMap().value("names").toList().first().toList().first().toString();
+    }
+
+    void paletteFoldsMarksAndKeySymbols() {
+        QCOMPARE(Fuzzy::fold("Źródła i USTAWIENIA"), QString("zrodla i ustawienia"));
+        QCOMPARE(Fuzzy::fold("Zażółć gęślą jaźń"), QString("zazolc gesla jazn"));
+        QCOMPARE(Fuzzy::fold("Ctrl ⇧ E"), QString("ctrl shift  e"));
+        QVERIFY(Fuzzy::isKey("shift+e", {"Ctrl E", "⇧ E"}));
+        QVERIFY(Fuzzy::isKey("⇧E", {"⇧ E"}));
+        QVERIFY(Fuzzy::isKey("ctrl shift e", {"Ctrl ⇧ E"}));
+        QVERIFY(!Fuzzy::isKey("e", {"⇧ E"}));
+    }
+
+    void paletteScoresWordStartsAndRunsAboveScatteredLetters() {
+        // The same letters: at a word's start and together, over scattered.
+        QVERIFY(Fuzzy::score("kal", "kalendarz") > Fuzzy::score("kal", "skakal"));
+        QVERIFY(Fuzzy::score("ej", "eksportuj jpeg") > Fuzzy::score("ej", "zdjecie"));
+        QVERIFY(Fuzzy::score("moz", "mozaika") > Fuzzy::score("moz", "pomoz"));
+        // Not there in order, and no word one slip from it: none.
+        QCOMPARE(Fuzzy::score("xyz", "eksportuj jpeg"), 0);
+        // A slip in a long enough word is found, below the word typed right.
+        QVERIFY(Fuzzy::score("eksprot", "eksportuj jpeg") > 0);
+        QVERIFY(Fuzzy::score("eksprot", "eksportuj jpeg") < Fuzzy::score("eksport", "eksportuj jpeg"));
+        QVERIFY(Fuzzy::score("kalnedarz", "kalendarz") > 0);
+        // Three letters are too few to guess a slip in.
+        QCOMPARE(Fuzzy::score("xal", "kalendarz"), 0);
+    }
+
+    void paletteFindsRealCommandsByAFewLetters() {
+        // What is typed, and the command that must come first.
+        const QList<std::pair<QString, QString>> typed = {
+            // The start of a word, Polish or English.
+            {"kal", "Zdjęcia każdego dnia"},
+            {"calendar", "Zdjęcia każdego dnia"},
+            {"mapa", "Przeglądaj zdjęcia na mapie"},
+            {"map", "Przeglądaj zdjęcia na mapie"},
+            {"ulub", "Ulubione"},
+            {"undo", "Cofnij"},
+            {"export", "Eksportuj JPEG"},
+            {"tecz", "Tęczowa ściana"},
+            {"rainbow", "Tęczowa ściana"},
+            // Diacritics typed without them.
+            {"zakoncz", "Zakończ"},
+            {"zrodla", "Źródła i ustawienia"},
+            {"tlo", "Zrób z niego tło pulpitu"},
+            {"zdjecia kazdego", "Zdjęcia każdego dnia"},
+            {"obroc", "Obróć zdjęcie o ćwierć obrotu; ⇧ R z powrotem"},
+            // Initials, and words typed apart in any order.
+            {"eo", "Eksportuj oryginał"},
+            {"ej", "Eksportuj JPEG"},
+            {"zw", "Zaznacz wszystkie"},
+            {"jpeg eks", "Eksportuj JPEG"},
+            {"moz kaf", "Mozaika: większe, mniejsze kafelki"},
+            // A slip.
+            {"eksprot", "Eksportuj JPEG"},
+            {"mozaiak", "Mozaika ze zdjęcia"},
+            {"ulubine", "Ulubione"},
+            {"kadrj", "Kadruj zdjęcie"},
+            // The key itself, first of all.
+            {"h", "Mozaika ze zdjęcia"},
+            {"H", "Mozaika ze zdjęcia"},
+            {"shift f", "Osoby"},
+            {"⇧F", "Osoby"},
+            {"ctrl shift e", "Eksportuj oryginał"},
+            {"?", "Klawisze i gesty"},
+        };
+        QStringList wrong;
+        for (const auto &[query, first] : typed)
+            if (const QString found = firstFound(query); found != first)
+                wrong << QStringLiteral("\"%1\": %2, not %3").arg(query, found, first);
+        QVERIFY2(wrong.isEmpty(), qPrintable(wrong.join("; ")));
+        // Two with one key: both, in the list's order.
+        const QVariantList w = Fuzzy().rank("w", paletteCommands());
+        QVERIFY(w.size() >= 2);
+        // Nothing like it.
+        QCOMPARE(firstFound("qqqq"), QString());
+        QCOMPARE(firstFound("   "), QString());
+    }
+
+    void translatorSaysTheEnglishOfAWordShown() {
+        QTemporaryDir dir;
+        write(dir.path() + "/language", "pl\n");
+        Translator polish(dir.path() + "/language", PINHOLE_I18N);
+        QVERIFY(polish.sourcesOf("Zakończ").contains("Quit"));
+        QVERIFY(polish.sourcesOf("Eksportuj JPEG").contains("Export JPEG"));
+        QVERIFY(polish.sourcesOf("nie ma takiego").isEmpty());
+        Translator english(QTemporaryDir().path() + "/language", PINHOLE_I18N);
+        QVERIFY(english.sourcesOf("Quit").isEmpty());
     }
 
     void englishIsTheFallback() {

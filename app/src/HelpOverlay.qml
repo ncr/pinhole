@@ -1,28 +1,61 @@
 import QtQuick
 import Pinhole
 import "keys.js" as KeyNames
+import "focus.js" as Focus
 
 // The keys and gestures, on ? or the ? button: made from the window's
 // commands (Command.qml, keymap.h), so it says what Pinhole does and no
-// more. Three tabs, the keyboard's, the mouse's and the touchpad's, opening
-// on the one used last; as few words as will do, in as many columns as
+// more. And a command palette: what is typed finds commands by a few
+// letters (fuzzy.h), the best first, each with its key beside it, and ⏎ or
+// a click does it as its key would, in the place under the help (`under`).
+// Typing starts at once: ? opens straight into it, so the one key that
+// teaches the shortcuts also runs them (Ctrl K and Ctrl P, free, would be a
+// second name for the same card). Three tabs, the keyboard's, the mouse's
+// and the touchpad's, opening on the one used last; as few words as will do, in as many columns as
 // fit, scrolling only if the window is too short for them. The card is the
 // same on all three, laid out for the one that needs the most room, so
 // turning from one to the next moves nothing.
 Item {
     id: root
     anchors.fill: parent
-    visible: opacity > 0
+    // There from the moment it is shown, as it fades in: what is typed at
+    // once is the palette's.
+    visible: shown || opacity > 0
     opacity: shown ? 1 : 0
     Behavior on opacity { NumberAnimation { duration: 120 } }
 
     property bool shown: false
     // Keys plugins list without commands of their own: [{plugin, keys}].
     property var pluginSections: []
+    // The layer that has the keys under the help (Main.qml): the palette
+    // runs a command only where its key would work now.
+    property string under: "grid"
 
     // "keyboard", "mouse" or "touchpad".
     property string tab: "keyboard"
-    onShownChanged: if (shown) tab = keymap.input
+    // What had the keys before the palette's line took them, to give them
+    // back.
+    property Item focusBefore: null
+    onShownChanged: {
+        if (shown) {
+            tab = keymap.input
+            field.text = ""
+            focusBefore = root.Window.activeFocusItem
+            field.input.forceActiveFocus()
+            return
+        }
+        giveFocusBack()
+    }
+    function giveFocusBack() {
+        const now = root.Window.activeFocusItem
+        if (now && Focus.within(root, now)) {
+            if (focusBefore && focusBefore.visible && !Focus.within(root, focusBefore))
+                focusBefore.forceActiveFocus()
+            else
+                now.focus = false
+        }
+        focusBefore = null
+    }
     readonly property var tabs: [
         { id: "keyboard", name: qsTr("Keyboard") },
         { id: "mouse", name: qsTr("Mouse") },
@@ -64,17 +97,23 @@ Item {
         const titleOf = s => titles[s] ?? (s.startsWith("plugin:") ? plugins.at(s.slice(7)).name ?? s.slice(7) : s)
         const partsOf = tab => {
             const rows = {}
-            const add = (section, how, what) => {
+            // Each row [how, what, what does it]: the commands, or for a
+            // key a plugin lists, [plugin, key] (the palette's, which looks
+            // for the one that works where it is only as it is asked).
+            const add = (section, how, what, doer) => {
                 const list = rows[section] ?? (rows[section] = [])
-                if (!list.some(r => r[0] === how && r[1] === what))
-                    list.push([how, what])
+                const same = list.find(r => r[0] === how && r[1] === what)
+                if (!same)
+                    list.push([how, what, [doer]])
+                else
+                    same[2].push(doer)
             }
             for (const c of commands) {
                 if (!c.section || !c.text)
                     continue
                 if (tab === "keyboard") {
                     if (c.keyHelp && c.keyName !== "")
-                        add(sectionOf(c), c.keyName, c.text)
+                        add(sectionOf(c), c.keyName, c.text, c)
                 } else if (c.pointerHelp) {
                     const how = tab === "mouse" ? c.mouse : c.touchpad
                     if (how)
@@ -84,7 +123,7 @@ Item {
             if (tab === "keyboard")
                 for (const s of pluginSections)
                     for (const k of s.keys)
-                        add("plugin:" + s.plugin, KeyNames.nameOf(k[0]), k[1])
+                        add("plugin:" + s.plugin, KeyNames.nameOf(k[0]), k[1], [s.plugin, k[0], s.actions ?? []])
             const known = order.filter(s => rows[s] !== undefined)
             const others = Object.keys(rows).filter(s => order.indexOf(s) < 0)
                 .sort((a, b) => titleOf(a).localeCompare(titleOf(b)))
@@ -94,6 +133,119 @@ Item {
         for (const t of tabs)
             all[t.id] = partsOf(t.id)
         return all
+    }
+
+    // The palette: every row of the keyboard's tab and what does it, but
+    // the help's own key; for a key a plugin lists, every command with
+    // that key (keymap.h keeps one live per layer). Made as typing starts.
+    readonly property string query: field.text
+    readonly property bool searching: query.trim() !== ""
+    readonly property var entries: {
+        if (!searching)
+            return []
+        const byKey = {}
+        for (const c of keymap.actions())
+            for (const k of c.keys) {
+                const key = keymap.portable(k)
+                ;(byKey[key] ?? (byKey[key] = [])).push(c)
+            }
+        const list = []
+        for (const part of sections.keyboard ?? [])
+            for (const row of part.keys) {
+                if (row[2].some(d => d && d.name === "help.toggle"))
+                    continue
+                const doers = row[2].map(d => Array.isArray(d)
+                    ? { plugin: d[0], key: d[1], actions: d[2], commands: byKey[keymap.portable(d[1])] ?? [] } : d)
+                list.push({ text: row[1], key: row[0], part: part.title, doers: doers })
+            }
+        return list
+    }
+    // Each as the matcher takes it: its words and their English, and its
+    // part's, a little less; its keys, as shown and each it has.
+    readonly property var candidates: entries.map(e => {
+        const names = [[e.text, 100]]
+        for (const english of translator.sourcesOf(e.text))
+            names.push([english, 100])
+        names.push([e.part, 80])
+        for (const english of translator.sourcesOf(e.part))
+            names.push([english, 80])
+        const keys = [e.key]
+        for (const d of e.doers)
+            for (const k of d.commands ? [d.key] : d.keys)
+                keys.push(KeyNames.nameOf(k))
+        return { names: names, keys: keys }
+    })
+    // The command a row's key presses here, else one that does it
+    // elsewhere; null for keys a plugin reads itself. For a key a plugin
+    // lists, the plugin's own or one made for one of its actions (a menu
+    // row's, MenuGroup's, written in Pinhole's file), never another's with
+    // that key, which does something else.
+    function commandFor(entry) {
+        let elsewhere = null
+        for (const d of entry.doers)
+            for (const c of d.commands ?? [d]) {
+                const action = c.modelData
+                const its = !d.commands || c.plugin() === d.plugin
+                    || (!!action && (d.actions.includes(action) || d.actions.includes(action.of)))
+                if (!its)
+                    continue
+                if (c.liveIn(under))
+                    return c
+                elsewhere = elsewhere ?? c
+            }
+        return elsewhere
+    }
+    // What was typed finds, best first: those that work here, then, dimmed,
+    // those that do not (here, or now), to say where they would. One of
+    // each, the same words and key in two parts once. Found again as the
+    // typing, the place under it or the commands change, not on every
+    // change of what each can do (as many as a mode turned on makes): ⏎
+    // asks that again.
+    property var results: []
+    function search() {
+        if (!shown)
+            return
+        const was = results[current]
+        const found = !searching ? [] : fuzzy.rank(query, candidates).map(i => {
+            const e = entries[i]
+            const command = commandFor(e)
+            return { text: e.text, key: e.key, part: e.part, command: command,
+                     runnable: !!command && command.liveIn(under) }
+        })
+        const seen = new Set()
+        const list = []
+        for (const e of found.filter(e => e.runnable).concat(found.filter(e => !e.runnable))) {
+            const id = e.text + "\n" + e.key
+            if (!seen.has(id)) {
+                seen.add(id)
+                list.push(e)
+            }
+        }
+        results = list
+        // The one chosen stays chosen while it is still found.
+        const again = was ? list.findIndex(e => e.runnable && e.text === was.text && e.key === was.key) : -1
+        current = again >= 0 && !queryChanging ? again : 0
+    }
+    property bool queryChanging: false
+    onQueryChanged: { queryChanging = true; search(); queryChanging = false }
+    onUnderChanged: search()
+    onCandidatesChanged: search()
+    readonly property int runnable: results.filter(e => e.runnable).length
+    // The one ⏎ does: the best, until ↑ ↓ or the pointer choose another.
+    property int current: 0
+    function move(by) {
+        if (runnable > 0)
+            current = Math.max(0, Math.min(runnable - 1, current + by))
+    }
+    // Done as its key would do it, then the help put away: the keys given
+    // back first, for what it does to take them. (The grid's buttons are
+    // there under the help, their keys usable, until it goes.)
+    function run(entry) {
+        if (!entry || !entry.runnable || !entry.command.liveIn(under))
+            return
+        giveFocusBack()
+        entry.command.trigger()
+        shown = false
     }
 
     // Its keys, while it is on top (Command.qml).
@@ -120,7 +272,12 @@ Item {
         autoRepeat: true
         mouse: qsTr("Wheel")
         touchpad: qsTr("Two fingers")
-        onTriggered: scroller.contentY = Math.max(0, scroller.contentY - 3 * theme.fontSize)
+        onTriggered: {
+            if (root.searching)
+                root.move(-1)
+            else
+                scroller.contentY = Math.max(0, scroller.contentY - 3 * theme.fontSize)
+        }
     }
     Command {
         name: "help.down"
@@ -129,7 +286,12 @@ Item {
         autoRepeat: true
         mouse: qsTr("Wheel")
         touchpad: qsTr("Two fingers")
-        onTriggered: scroller.contentY = Math.max(0, Math.min(scroller.contentHeight - scroller.height, scroller.contentY + 3 * theme.fontSize))
+        onTriggered: {
+            if (root.searching)
+                root.move(1)
+            else
+                scroller.contentY = Math.max(0, Math.min(scroller.contentHeight - scroller.height, scroller.contentY + 3 * theme.fontSize))
+        }
     }
     Command {
         name: "help.pageUp"
@@ -137,7 +299,12 @@ Item {
         keyLayer: "help"
         mouse: qsTr("Wheel")
         touchpad: qsTr("Two fingers")
-        onTriggered: scroller.contentY = Math.max(0, scroller.contentY - scroller.height * 0.9)
+        onTriggered: {
+            if (root.searching)
+                root.move(-8)
+            else
+                scroller.contentY = Math.max(0, scroller.contentY - scroller.height * 0.9)
+        }
     }
     Command {
         name: "help.pageDown"
@@ -145,7 +312,22 @@ Item {
         keyLayer: "help"
         mouse: qsTr("Wheel")
         touchpad: qsTr("Two fingers")
-        onTriggered: scroller.contentY = Math.max(0, Math.min(scroller.contentHeight - scroller.height, scroller.contentY + scroller.height * 0.9))
+        onTriggered: {
+            if (root.searching)
+                root.move(8)
+            else
+                scroller.contentY = Math.max(0, Math.min(scroller.contentHeight - scroller.height, scroller.contentY + scroller.height * 0.9))
+        }
+    }
+    // ⏎ in the line runs the one chosen (FieldInput's accepted); this is
+    // for when the line does not have the keys.
+    Command {
+        name: "help.run"
+        keys: ["Return", "Enter"]
+        keyLayer: "help"
+        mouse: qsTr("Click a command")
+        touchpad: qsTr("Tap a command")
+        onTriggered: if (root.searching) root.run(root.results[root.current])
     }
 
     // As Omarchy's menus: a scrim of the theme's background at half, and a
@@ -365,6 +547,18 @@ Item {
             y: root.padding
             width: card.width - 2 * root.padding
             spacing: Math.round(theme.fontSize * 0.6)
+            // What to find: typed into from the start. Esc puts the card
+            // away, whether anything was typed or not; ? typed first too,
+            // as it opened it.
+            FieldInput {
+                id: field
+                objectName: "helpSearch"
+                width: parent.width
+                placeholder: qsTr("Type to find a command")
+                onAccepted: root.run(root.results[root.current])
+                onCleared: root.shown = false
+                onTextChanged: if (text === "?") root.shown = false
+            }
             Row {
                 spacing: 6
                 Repeater {
@@ -392,14 +586,14 @@ Item {
             // needs.
             Item {
                 width: parent.width
-                implicitWidth: Math.max(keyboardWords.implicitWidth, mouseWords.implicitWidth, touchpadWords.implicitWidth)
-                height: Math.max(keyboardWords.implicitHeight, mouseWords.implicitHeight, touchpadWords.implicitHeight)
+                implicitWidth: Math.max(keyboardWords.implicitWidth, mouseWords.implicitWidth, touchpadWords.implicitWidth, paletteWords.implicitWidth)
+                height: Math.max(keyboardWords.implicitHeight, mouseWords.implicitHeight, touchpadWords.implicitHeight, paletteWords.implicitHeight)
                 UiText {
                     id: keyboardWords
                     width: parent.width
                     wrapMode: Text.WordWrap
                     color: theme.darkForeground
-                    opacity: root.tab === "keyboard" ? 1 : 0
+                    opacity: root.tab === "keyboard" && !root.searching ? 1 : 0
                     text: qsTr("Each button shows its key beside it.")
                 }
                 UiText {
@@ -407,15 +601,23 @@ Item {
                     width: parent.width
                     wrapMode: Text.WordWrap
                     color: theme.darkForeground
-                    opacity: root.tab === "mouse" ? 1 : 0
+                    opacity: root.tab === "mouse" && !root.searching ? 1 : 0
                     text: qsTr("Every button works with a click, as its key does.")
+                }
+                UiText {
+                    id: paletteWords
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                    color: theme.darkForeground
+                    opacity: root.searching ? 1 : 0
+                    text: qsTr("↑ ↓ choose, ⏎ does it as its key would, Esc closes.")
                 }
                 UiText {
                     id: touchpadWords
                     width: parent.width
                     wrapMode: Text.WordWrap
                     color: theme.darkForeground
-                    opacity: root.tab === "touchpad" ? 1 : 0
+                    opacity: root.tab === "touchpad" && !root.searching ? 1 : 0
                     text: qsTr("Every button works with a tap, as its key does. A tap with two fingers only stops what moves.")
                 }
             }
@@ -430,6 +632,10 @@ Item {
             contentHeight: root.board.height
             boundsBehavior: Flickable.StopAtBounds
             clip: true
+            // The board stays laid out under what was found: the card
+            // keeps its size.
+            opacity: root.searching ? 0 : 1
+            enabled: !root.searching
             Board { id: keyboardBoard; help: root; tab: "keyboard" }
             Board { id: mouseBoard; help: root; tab: "mouse" }
             Board { id: touchpadBoard; help: root; tab: "touchpad" }
@@ -437,7 +643,38 @@ Item {
         // The wheel and the touchpad anywhere on the card scroll it.
         Scroller {
             anchors.fill: parent
-            flickable: scroller
+            flickable: root.searching ? resultList : scroller
+        }
+        // What was typed finds, a row each, in the board's place.
+        ScrollList {
+            id: resultList
+            objectName: "helpResults"
+            anchors.fill: scroller
+            visible: root.searching
+            model: root.results
+            currentIndex: root.current
+            onCurrentIndexChanged: positionViewAtIndex(currentIndex, ListView.Contain)
+            delegate: MenuRow {
+                required property var modelData
+                required property int index
+                width: ListView.view.width
+                text: modelData.text
+                detail: modelData.part
+                hint: modelData.key
+                usable: modelData.runnable
+                lit: index === root.current && modelData.runnable
+                onPointed: if (modelData.runnable) root.current = index
+                onTapped: root.run(modelData)
+            }
+        }
+        UiText {
+            anchors.left: scroller.left
+            anchors.right: scroller.right
+            anchors.top: scroller.top
+            visible: root.searching && root.results.length === 0
+            wrapMode: Text.WordWrap
+            text: qsTr("No command like that")
+            color: theme.darkForeground
         }
     }
 }

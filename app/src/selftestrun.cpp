@@ -588,9 +588,111 @@ bool runSelfTest(const QString &test, const SelfTestContext &context) {
                 // nothing.
                 auto widths = std::make_shared<QList<int>>(QList<int>{850, 1200, 1700, 3200});
                 auto atWidths = std::make_shared<std::function<void()>>();
+                // Then the palette, in a narrow window: typed into at once,
+                // the best first, ⏎ doing it as its key would; a click on a
+                // row too; and what cannot be done here dimmed, not done.
+                auto palette = [=] {
+                    window->resize(560, window->height());
+                    help->setProperty("tab", QStringLiteral("keyboard"));
+                    const auto key = [window](int code, const QString &text = {}) {
+                        QWindowSystemInterface::handleKeyEvent<QWindowSystemInterface::SynchronousDelivery>(
+                            window, QEvent::KeyPress, code, Qt::NoModifier, text);
+                        QWindowSystemInterface::handleKeyEvent<QWindowSystemInterface::SynchronousDelivery>(
+                            window, QEvent::KeyRelease, code, Qt::NoModifier, text);
+                    };
+                    const auto type = [key](const QString &text) {
+                        for (const QChar c : text)
+                            key(c.isLetter() ? Qt::Key_A + (c.toLower().unicode() - 'a') : Qt::Key_Space, c);
+                    };
+                    const auto results = [help] { return help->property("results").toList(); };
+                    const auto first = [results] {
+                        const QVariantList found = results();
+                        return found.isEmpty() ? QVariantMap() : found.first().toMap();
+                    };
+                    const auto shown = [help] { return help->property("shown").toBool(); };
+                    const auto layer = [window] { return window->property("keyLayer").toString(); };
+                    struct Step { const char *what; std::function<void()> act; int wait; std::function<bool()> check; };
+                    auto steps = std::make_shared<QList<Step>>(QList<Step>{
+                        {"the palette's line has the keys as it opens", [] {}, 200, [window] {
+                             QQuickItem *field = window->findChild<QQuickItem *>(QStringLiteral("helpSearch"));
+                             QQuickItem *input = field ? field->property("input").value<QQuickItem *>() : nullptr;
+                             return input && input->hasActiveFocus();
+                         }},
+                        {"typed \"calendar\", Calendar's command first, to be done here",
+                         [type] { type(QStringLiteral("calendar")); }, 300, [first] {
+                             const QVariantMap found = first();
+                             std::printf("selftest:      first: %s (%s)\n", qPrintable(found.value("text").toString()),
+                                         qPrintable(found.value("key").toString()));
+                             return found.value("text").toString() == QLatin1String("Every day's photos")
+                                 && found.value("runnable").toBool();
+                         }},
+                        {"⏎ does it: the help goes, Calendar comes", [key] { key(Qt::Key_Return); }, 800,
+                         [shown, layer] { return !shown() && layer() == QLatin1String("plugin"); }},
+                        {"Esc there puts Calendar away", [key] { key(Qt::Key_Escape); }, 800,
+                         [layer] { return layer() == QLatin1String("grid"); }},
+                        {"typed \"previous\", the viewer's Previous, next is there, dimmed", [=] {
+                             QMetaObject::invokeMethod(window, "showHelp", Q_ARG(QVariant, true));
+                             type(QStringLiteral("previous"));
+                         }, 400, [results] {
+                             for (const QVariant &entry : results())
+                                 if (entry.toMap().value("text").toString() == QLatin1String("Previous, next"))
+                                     return !entry.toMap().value("runnable").toBool();
+                             return false;
+                         }},
+                        {"Esc with something typed closes it", [key] { key(Qt::Key_Escape); }, 300,
+                         [shown] { return !shown(); }},
+                        {"typed \"s\", S's command first", [=] {
+                             QMetaObject::invokeMethod(window, "showHelp", Q_ARG(QVariant, true));
+                             type(QStringLiteral("s"));
+                         }, 400, [first] { return first().value("text").toString() == QLatin1String("Select, Done"); }},
+                        {"a click on its row does it", [window] {
+                             QQuickItem *list = window->findChild<QQuickItem *>(QStringLiteral("helpResults"));
+                             const QPointF at = list ? list->mapToScene(QPointF(list->width() / 2, 8)) : QPointF();
+                             QMouseEvent press(QEvent::MouseButtonPress, at, window->mapToGlobal(at), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+                             QMouseEvent release(QEvent::MouseButtonRelease, at, window->mapToGlobal(at), Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+                             QCoreApplication::sendEvent(window, &press);
+                             QCoreApplication::sendEvent(window, &release);
+                         }, 500, [window, shown] {
+                             PhotoGrid *grid = window->findChild<PhotoGrid *>(QStringLiteral("grid"));
+                             return !shown() && grid && grid->selecting();
+                         }},
+                        {"and the keys are the grid's again: S is Done", [key] { key(Qt::Key_S, QStringLiteral("s")); }, 400,
+                         [window] {
+                             PhotoGrid *grid = window->findChild<PhotoGrid *>(QStringLiteral("grid"));
+                             return grid && !grid->selecting();
+                         }},
+                    });
+                    auto next = std::make_shared<std::function<void()>>();
+                    *next = [=] {
+                        if (steps->isEmpty()) {
+                            QCoreApplication::exit(*failures ? 1 : 0);
+                            return;
+                        }
+                        const Step step = steps->takeFirst();
+                        auto clock = std::make_shared<QElapsedTimer>();
+                        clock->start();
+                        step.act();
+                        QTimer::singleShot(step.wait, window, [=] {
+                            // Each in about the time it waits: a window
+                            // standing still seconds after a command run
+                            // from the palette (its list found again for
+                            // each change a mode makes) fails here.
+                            const qint64 late = clock->elapsed() - step.wait;
+                            const bool ok = step.check() && late < 3000;
+                            std::printf("selftest: %s %s%s\n", ok ? "ok  " : "FAIL", step.what,
+                                        late >= 3000 ? qPrintable(QStringLiteral(" (the window stood still %1 ms)").arg(late)) : "");
+                            std::fflush(stdout);
+                            *failures += ok ? 0 : 1;
+                            if (const QString dir = qEnvironmentVariable("PINHOLE_SELFTEST_DIR"); !dir.isEmpty())
+                                window->grabWindow().save(QStringLiteral("%1/palette-%2.png").arg(dir).arg(9 - steps->size()));
+                            (*next)();
+                        });
+                    };
+                    (*next)();
+                };
                 *atWidths = [=] {
                     if (widths->isEmpty()) {
-                        QCoreApplication::exit(*failures ? 1 : 0);
+                        palette();
                         return;
                     }
                     const int width = widths->takeFirst();

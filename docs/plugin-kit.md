@@ -134,6 +134,7 @@ Signals:
 
 Functions:
 
+- `liveIn(layer)`: Whether its keys would work with `layer` on top: the palette's question for the layer under it.
 - `plugin()`: The plugin it is in, by the Loader Main.qml loads each in, else by its file; "" for Pinhole's own, or not known yet.
 - `ours()`: The "plugin" layer's keys are the covering plugin's alone (keymap.h).
 - `trigger()`

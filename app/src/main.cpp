@@ -52,6 +52,7 @@
 #include "theme.h"
 #include "thumbnailloader.h"
 #include "translator.h"
+#include "fuzzy.h"
 #include "touchpadhold.h"
 
 #include <cstdio>
@@ -285,6 +286,7 @@ int main(int argc, char *argv[]) {
     QObject::connect(&sources, &Sources::switched, &history, &History::clear);
 
     Keymap keymap;
+    Fuzzy fuzzy;
     QQmlApplicationEngine engine;
     engine.addImageProvider(QStringLiteral("photo"), new PhotoProvider);
     engine.addImageProvider(QStringLiteral("file"), new FileProvider);
@@ -297,6 +299,8 @@ int main(int argc, char *argv[]) {
     // Every action and its keys, the layer that has them, and how the
     // window was last used (keymap.h).
     engine.rootContext()->setContextProperty("keymap", &keymap);
+    // The palette's search, by a few letters of a command (fuzzy.h).
+    engine.rootContext()->setContextProperty("fuzzy", &fuzzy);
     engine.rootContext()->setContextProperty("viewer", &viewer);
     engine.rootContext()->setContextProperty("outgoing", &outgoing);
     engine.rootContext()->setContextProperty("history", &history);

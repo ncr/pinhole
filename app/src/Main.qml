@@ -1236,7 +1236,7 @@ ApplicationWindow {
         id: helpView
         anchors.fill: parent
         active: false
-        sourceComponent: HelpOverlay { objectName: "help"; pluginSections: win.pluginHelp }
+        sourceComponent: HelpOverlay { objectName: "help"; pluginSections: win.pluginHelp; under: win.layerUnderHelp }
     }
     readonly property bool tourShown: tourView.item?.shown ?? false
     Loader {
@@ -1257,7 +1257,10 @@ ApplicationWindow {
     // the viewer comes over the photos, and back, rather than vanish.
     property real chrome: !viewerShown && !panelUp ? 1 : 0
     Behavior on chrome { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+    // Under the help alone they stay, unseen (its scrim and card over
+    // them): their keys are what its palette runs.
     readonly property bool chromeUp: chrome > 0
+        || (helpShown && !viewerShown && !guideShown && !side.shown && !addSourceShown && !pluginCovering)
 
     // Something over the window that takes the keys.
     readonly property bool panelUp: helpShown || guideShown || side.shown || addSourceShown || pluginCovering
@@ -1267,7 +1270,9 @@ ApplicationWindow {
     // Whose the keys are (keymap.h): the one on top, so two never share one.
     readonly property string keyLayer: tourShown ? "tour"
         : helpShown ? "help"
-        : guideShown ? "guide"
+        : layerUnderHelp
+    // Whose they would be without the help: what its palette runs in.
+    readonly property string layerUnderHelp: guideShown ? "guide"
         : addSourceShown ? "addSource"
         : firstRun && !pluginCovering ? "firstRun"
         : side.shown ? "side"

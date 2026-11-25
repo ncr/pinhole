@@ -7,6 +7,8 @@ ControlSurface {
     id: row
     property string text
     property string hint
+    // A word after its text, dimmer: where it is from ("Mosaic").
+    property string detail
     property bool selected: false
     property bool checkable: false
     property bool reserveCheck: checkable
@@ -52,13 +54,26 @@ ControlSurface {
         down: row.pressed
     }
     UiText {
+        id: label
         anchors.left: parent.left
         anchors.leftMargin: row.inset
-        anchors.right: trailing.left
-        anchors.rightMargin: row.inset
+        // As wide as the row leaves it; with a detail, no wider than it is.
+        width: Math.max(0, Math.min(row.detail !== "" ? implicitWidth : Infinity, trailing.x - row.inset - x))
         y: centredIn(parent.height)
         text: row.text
         color: row.hot || row.selected ? theme.accent : theme.foreground
+        elide: Text.ElideRight
+        Accessible.ignored: true
+    }
+    UiText {
+        visible: row.detail !== "" && width > theme.fontSize
+        anchors.left: label.right
+        anchors.leftMargin: Math.round(theme.fontSize * 0.6)
+        anchors.right: trailing.left
+        anchors.rightMargin: row.inset
+        y: centredIn(parent.height)
+        text: row.detail
+        color: theme.darkForeground
         elide: Text.ElideRight
         Accessible.ignored: true
     }

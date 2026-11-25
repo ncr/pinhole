@@ -226,7 +226,8 @@ Then open Pinhole from the launcher and add a source in the side panel
 (Tab): an Apple ID (password and two-factor code, or the session icloudpd
 already has) or a folder. The library builds in the background, the index
 in about 5 minutes and every thumbnail in about 6 more for 50,000 photos,
-and the grid fills as it does. `?` lists every shortcut.
+and the grid fills as it does. `?` lists every shortcut, and finds any
+command by a few letters as you type: ⏎ does it.
 
 The same from a terminal, without the window:
 
