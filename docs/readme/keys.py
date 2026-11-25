@@ -18,7 +18,7 @@ YELLOW, INK, GREY, EDGE, DIM = "#FFD60A", "#1a1a1c", "#8d8c86", "#3a3a3d", "#4a4
 ROWS = ["QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM"]
 STAGGER = [0, 0.25, 0.75]  # of a key and its gap, as on a real keyboard
 KEYS = {
-    "R": "Turn", "T": "Theme", "Y": "Calendar", "I": "Info", "O": "Send", "P": "Frame",
+    "W": "Wall", "R": "Turn", "T": "Theme", "Y": "Calendar", "I": "Info", "O": "Send", "P": "Frame",
     "S": "Select", "D": "This day", "F": "Favourite", "G": "Series", "H": "Mosaic", "K": "Crop", "L": "Live",
     "C": "Copy", "B": "Background", "N": "Newest", "M": "Map",
 }

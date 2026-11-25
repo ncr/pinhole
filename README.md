@@ -1,4 +1,4 @@
-<img src="docs/readme/keys.svg" alt="Pinhole's keyboard: R turn, T theme, Y calendar, I info, O send, P frame, S select, D on this day, F favourite, G series, H mosaic, K crop, L live, C copy, B background, N newest, M map" width="100%">
+<img src="docs/readme/keys.svg" alt="Pinhole's keyboard: W rainbow wall, R turn, T theme, Y calendar, I info, O send, P frame, S select, D on this day, F favourite, G series, H mosaic, K crop, L live, C copy, B background, N newest, M map" width="100%">
 
 A fast photo browser for Omarchy: iCloud Photos and folders today, more sources coming. Working name.
 
@@ -73,6 +73,7 @@ imagine them. With AI an idea is enough to start building, and that is pure joy.
 <tr><td><b>Photo frame</b></td><td><kbd>P</kbd></td><td>Photos one after another, slowly panned and zoomed.</td></tr>
 <tr><td><b>Background</b></td><td><kbd>B</kbd></td><td>A photo or a video as the desktop background.</td></tr>
 <tr><td><b>Theme</b></td><td><kbd>T</kbd></td><td>An Omarchy theme from the photo on screen.</td></tr>
+<tr><td><b>Rainbow wall</b></td><td><kbd>W</kbd></td><td>Your most colourful photos, laid out by hue.</td></tr>
 <tr><td><b>Mosaic</b></td><td><kbd>H</kbd></td><td>Any photo, made out of your other photos.</td></tr>
 <tr><th colspan="3" align="left">↓ Imagined it, so I built it</th></tr>
 </table>
