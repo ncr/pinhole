@@ -90,7 +90,7 @@ github.com/ncr/pinhole with it.
    if you know it).
 ```
 
-Something that does not work is worth a pull request too: it saves the next person the afternoon.
+A fix for something that does not work is worth a pull request too: it saves the next person the afternoon.
 
 ## More
 
