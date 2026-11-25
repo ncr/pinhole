@@ -23,7 +23,7 @@ KEYS = {
     "C": "Copy", "B": "Background", "N": "Newest", "M": "Map",
 }
 MORE = [("Tab", "Settings"), ("?", "Shortcuts"), ("Space", "Open"), ("Esc", "Back"),
-        ("Ctrl F", "Search"), ("⇧ F", "People"), ("⇧ S", "Screenshots")]
+        ("Ctrl F", "Search"), ("⇧ F", "People"), ("⇧ S", "Screenshots"), ("⇧ D", "Screens")]
 
 WIDTH, LEFT, KEY, GAP = 1680, 108, 132, 16
 

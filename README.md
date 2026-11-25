@@ -14,7 +14,7 @@ git clone https://github.com/ncr/pinhole && pinhole/bin/install
 
 For Arch Linux, made for and tried on Omarchy. Installing takes several minutes the first time. Then open
 Pinhole, press <kbd>Tab</kbd> and add your Apple ID or a folder. A big library takes a few minutes to appear, and
-the grid fills as it does. <kbd>?</kbd> lists every shortcut.
+the grid fills as it does. <kbd>?</kbd> lists every shortcut and finds any command by a few letters.
 
 More in [Installing Pinhole](docs/install.md): what the installer does, the bar widget, updates, uninstalling.
 
@@ -23,7 +23,7 @@ More in [Installing Pinhole](docs/install.md): what the installer does, the bar 
 From the ones I use every day to the ones that exist because I could imagine them. With AI an idea is enough to
 start building, and that is pure joy.
 
-<img src="docs/readme/plugins.svg" alt="Plugins, from useful every day to imagined it, so I built it: Favourites F, Turn and crop R K, Info I, Send to phone O, Screenshots Shift S, Search Ctrl F, People Shift F, Live Photos L, Map M, On this day D, Series G, Contact sheet K, Year calendar Y, Photo frame P, Background B, Theme T, Rainbow wall W, Mosaic H" width="100%">
+<img src="docs/readme/plugins.svg" alt="Plugins, from useful every day to imagined it, so I built it: Favourites F, Turn and crop R K, Info I, Send to phone O, Screenshots Shift S, Photos of screens Shift D, Search Ctrl F, People Shift F, Live Photos L, Map M, On this day D, Series G, Contact sheet K, Year calendar Y, Photo frame P, Background B, Theme T, Rainbow wall W, Mosaic H" width="100%">
 
 [What each plugin does](docs/features.md)
 
