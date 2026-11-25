@@ -216,8 +216,15 @@ void runLayersSelfTest(QQuickWindow *window, PhotoGrid *grid, Viewer &viewer, co
         grid->setSelecting(false);
     });
     at(13300, [=] {
-        check(shownWithText(window->contentItem(), QStringLiteral("Everywhere")) != nullptr,
-              QStringLiteral("… and its button on the grid"));
+        // A button of its own, or, with more than two, in More ▾.
+        QQuickItem *more = window->findChild<QQuickItem *>(QStringLiteral("gridMore"));
+        bool folded = false;
+        if (more && more->isVisible())
+            for (const QVariant &item : more->property("items").toList())
+                if (auto *action = item.value<QObject *>(); action && action->property("text").toString() == QLatin1String("Everywhere"))
+                    folded = true;
+        check(shownWithText(window->contentItem(), QStringLiteral("Everywhere")) != nullptr || folded,
+              QStringLiteral("… and its button on the grid, or in its More"));
         press(window, Qt::Key_F8);
         check(plugin()->property("pressedIn").toString() == QLatin1String("grid") && plugin()->property("photos").toString().isEmpty(),
               QStringLiteral("F8 on the grid: pressed in %1, on no photos (%2)")

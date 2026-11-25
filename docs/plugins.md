@@ -654,7 +654,9 @@ frame: what it sets in `Component.onCompleted` from the library, or from
 its settings, is there as the window first shows. It sets:
 
 - `actions`: `PluginAction`s, drawn as Pinhole's buttons. `place` is
-  `"grid"` (top right, before Select), `"viewer"` (a photo full window,
+  `"grid"` (top right, before Select; with more than two shown there, all
+  of them are in one More ▾, but for those `active` or of `order` below 0),
+  `"viewer"` (a photo full window,
   before Copy) or `"selection"` (select mode's bar, after Copy); then
   `text`, `key`, `helpText` (what the help says it does; its
   `text` if left out), `shown`, `usable`, `active` (a button filled with the
