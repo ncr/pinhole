@@ -1,5 +1,6 @@
 {
   "api": 16,
+  "startsOff": true,
   "id": "pinhole.send",
   "name": "Send to phone",
   "version": "1.0.0",

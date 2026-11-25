@@ -22,8 +22,8 @@ through them alone, Esc comes back. **X** (Not a screen) says the one the
 keys are on is not. **Hide them from the grid** in the side panel, or on
 that view, keeps them out of the grid, and so out of the Rainbow wall,
 Mosaic, the Photo frame and On this day, which leave out what the grid
-hides. On a photo shown full window, **Photo of a screen** (under More)
-says it is or is not one. Every step can be undone with Ctrl Z.
+hides. In select mode, **Photo of a screen** says the photos ticked are or
+are not ones. Every step can be undone with Ctrl Z.
 
 What you say is kept with the library (`pinhole.synced`, `is<TAB><id>`:
 true or false), so it is so on your other computers too (an iCloud

@@ -111,23 +111,27 @@ PinholePlugin {
             key: "H"
             shown: pinhole.library.count > 0
             onTriggered: mosaicView.open(pinhole.currentIndex())
-        },
-        PluginAction {
-            id: viewerAction
-            place: "viewer"
-            text: qsTr("Mosaic")
-            helpText: qsTr("A mosaic of this photo")
-            key: "H"
-            shown: pinhole.viewer.open && (pinhole.viewer.photo.avgColor ?? "") !== ""
-            onTriggered: {
-                // On a photo opened from a mosaic, which waits behind it
-                // to come back: closed, and opened anew over this photo.
-                if (mosaicView.shown && pinhole.away)
-                    mosaicView.close()
-                mosaicView.open(pinhole.viewer.index)
-            }
         }
     ]
+    // On a photo shown, a key and no button: the viewer's bar keeps to
+    // what is done with most photos.
+    Command {
+        name: "mosaic.ofShown"
+        text: qsTr("A mosaic of this photo")
+        section: "plugin"
+        keys: ["H"]
+        keyLayer: "viewer"
+        mouse: qsTr("Mosaic in the grid, over the photo")
+        touchpad: qsTr("Mosaic in the grid, over the photo")
+        usable: pinhole.viewer.open && (pinhole.viewer.photo.avgColor ?? "") !== ""
+        onTriggered: {
+            // On a photo opened from a mosaic, which waits behind it
+            // to come back: closed, and opened anew over this photo.
+            if (mosaicView.shown && pinhole.away)
+                mosaicView.close()
+            mosaicView.open(pinhole.viewer.index)
+        }
+    }
 
     // The tour's mosaic is of a favourite, if there is one: a photo its
     // person likes; else of the newest.
@@ -142,9 +146,9 @@ PinholePlugin {
     tour: [
         {
             title: qsTr("A photo made of your photos"),
-            text: qsTr("On a photo, H makes a mosaic of it: each tile is another of your photos, of the colour the picture has there."),
-            open: () => example(),
-            action: viewerAction
+            text: qsTr("Mosaic, or H, makes a mosaic of the photo under the pointer, or of the one shown: each tile is another of your photos, of the colour the picture has there."),
+            photo: () => example(),
+            action: gridAction
         },
         {
             title: qsTr("Bigger and smaller tiles"),

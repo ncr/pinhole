@@ -678,7 +678,9 @@ its settings, is there as the window first shows. It sets:
   Ctrl ⏎. In
   the viewer and select mode, actions with the same `group` are one button,
   the first of them shown, with the rest in a menu under ▾ beside it, opened
-  with ⇧ and that button's key; there an action's `hint`, a word, stands
+  with ⇧ and that button's key (unless one of the group has that key
+  itself, as Turn and crop's Turn back has ⇧ R: then the ▾ opens it and
+  each has its own key); there an action's `hint`, a word, stands
   at the right of its row in place of its key ("iPhone"). Pinhole sets its
   `hovered` while the pointer
   is on it, for the plugin to show what pressing it would do, as Series

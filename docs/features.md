@@ -20,8 +20,8 @@ sources fit in is in [docs/sources.md](sources.md).
 
 Everything that is set is in that side panel: the sources, where Pinhole
 keeps its files and how much room they take, and the plugins. iCloud,
-Folders, Favourites, Turn and crop, Live Photos, Info, Send to phone and
-Screenshots are on from the start; Series, People, the calendar, On this
+Folders, Favourites, Turn and crop, Live Photos, Info and Screenshots are
+on from the start; Send to phone, Series, People, the calendar, On this
 day, Mosaic, Rainbow wall, Contact sheet, Photo frame, Background and
 Theme are there too, off until turned on.
 
@@ -53,7 +53,7 @@ in Pictures/Pinhole.
 Send to phone (O, on a photo or what is ticked) sends photos to a phone or
 computer nearby with LocalSend open: the devices show as they answer, and
 once its owner accepts, the originals go, a Live Photo with its video, or
-HEIC as JPEG (J).
+HEIC as JPEG (J). It is off until turned on in the side panel.
 
 Info, on I on a photo, shows its details in a small panel over its corner:
 when it was taken, the camera, lens and exposure, its size and format (a
@@ -101,7 +101,8 @@ screen, a game on the TV, an error on a monitor, a machine's display, in
 thumbnails on this computer, in pinholed. They are not screenshots: those
 are the Screenshots plugin's. Shift+D shows them together; the side panel
 can hide them from the grid, and so from the wall, the mosaic and the photo
-frame. On a photo, Photo of a screen says it is or is not one; the photos
+frame. In select mode, Photo of a screen says the photos ticked are or are
+not ones; the photos
 very like it follow, on your other computers too.
 
 Screenshots keeps screenshots from crowding out the photos: each day's one

@@ -7160,6 +7160,38 @@ PinholePlugin {
         QVERIFY2(clean.errors.isEmpty() && clean.warnings.isEmpty(), qPrintable((clean.errors + clean.warnings).join('\n')));
     }
 
+    // A group's menu opens on ⇧ and its button's key, so another action of
+    // that key is refused; one in the group itself is not, as the group's
+    // menu then has no key (Turn and crop's Turn back, ⇧ R).
+    void checkGroupMenuKeys() {
+        QTemporaryDir dir;
+        const auto check = [&](const char *qml) {
+            write(dir.path() + "/Main.qml", qml);
+            return Plugins::footguns(dir.path()).errors.join('\n');
+        };
+        const QString apart = check(R"(import QtQuick
+import Pinhole.Plugin
+PinholePlugin {
+    actions: [
+        PluginAction { place: "viewer"; group: "edit"; text: qsTr("Turn"); key: "R" },
+        PluginAction { place: "viewer"; group: "edit"; text: qsTr("Crop"); key: "K" },
+        PluginAction { place: "viewer"; text: qsTr("Back"); key: "Shift+R" }
+    ]
+}
+)");
+        QVERIFY2(apart.contains("opens the menu of group \"edit\""), qPrintable(apart));
+        const QString within = check(R"(import QtQuick
+import Pinhole.Plugin
+PinholePlugin {
+    actions: [
+        PluginAction { place: "viewer"; group: "edit"; text: qsTr("Turn"); key: "R" },
+        PluginAction { place: "viewer"; group: "edit"; text: qsTr("Back"); key: "Shift+R" }
+    ]
+}
+)");
+        QVERIFY2(!within.contains("opens the menu"), qPrintable(within));
+    }
+
     // What the reviews found check let through: names Pinhole does not
     // have, the window's own objects, menus, keys over Pinhole's, words
     // put together in qsTr, and a manifest's misspelt key.

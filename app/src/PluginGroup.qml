@@ -15,7 +15,10 @@ MenuGroup {
     // the menu's way by the keys is there whatever shows (its items
     // without a key of their own are done through it).
     readonly property var keyed: action && action.key !== "" ? action : items.find(a => a.key !== "") ?? null
-    menuKey: keyed && !keyed.key.startsWith("Shift+") ? "Shift+" + keyed.key : ""
+    // None where one of them has that key itself (Turn and crop's Turn
+    // back, ⇧ R): its own keys are the way to each, and the ▾ the menu's.
+    readonly property string shifted: keyed && !keyed.key.startsWith("Shift+") ? "Shift+" + keyed.key : ""
+    menuKey: shifted !== "" && !items.some(a => a.key === shifted) ? shifted : ""
 
     // The button stands for each of them, for a tour to light.
     function claim() {
