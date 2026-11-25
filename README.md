@@ -25,7 +25,7 @@ start building, and that is pure joy.
 
 <img src="docs/readme/plugins.svg" alt="Plugins, from useful every day to imagined it, so I built it: Favourites F, Turn and crop R K, Info I, Send to phone O, Screenshots Shift S, Search Ctrl F, People Shift F, Live Photos L, Map M, On this day D, Series G, Contact sheet K, Year calendar Y, Photo frame P, Background B, Theme T, Rainbow wall W, Mosaic H" width="100%">
 
-What each one does is in [What Pinhole does](docs/features.md).
+[What each plugin does](docs/features.md)
 
 ## What is missing
 
