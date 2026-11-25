@@ -12,7 +12,7 @@ from pathlib import Path
 from keys import BOLD, REGULAR, text
 
 YELLOW, INK = "#FFD60A", "#1a1a1c"
-WIDTH, PAD, TOP, SHOT_H = 1680, 36, 168, 236  # TOP: where the screenshot starts, under the two lines
+WIDTH, PAD, TOP, SHOT_H, FRAME = 1680, 36, 168, 236, 6  # TOP: where the framed screenshot starts, under the two lines
 NAME = Path(__file__).with_name("BricolageGrotesque-ExtraBold.ttf")  # the name's typeface, if it is here
 
 
@@ -30,36 +30,26 @@ def name(x, y, width):
 
 
 
-def camera(top, right, bottom, hole_y, body):
+def camera(top, right, bottom, hole_y):
     """The camera from its side: the box, what sticks out of its top, and the plate the pinhole is in."""
     def block(x, y, w, h, r=6):
         return f'<rect x="{x:g}" y="{y:g}" width="{w:g}" height="{h:g}" rx="{r}" fill="{INK}"/>'
     out = [block(PAD, top, right - PAD, bottom - top, 22), block(right - 8, hole_y - 34, 22, 68)]
-    mid = (PAD + right) / 2
-    if body == "knobs":      # a box camera: the winding knob and the shutter button
-        out += [block(PAD + 44, top - 20, 92, 30), block(right - 118, top - 14, 46, 24)]
-    elif body == "finder":   # a viewfinder's hump in the middle, the shutter button beside it
-        out += [f'<path d="M{mid - 78} {top + 4} L{mid - 50} {top - 24} L{mid + 50} {top - 24} L{mid + 78} {top + 4} Z" '
-                f'fill="{INK}" stroke="{INK}" stroke-width="10" stroke-linejoin="round"/>',
-                block(right - 104, top - 14, 46, 24)]
-    elif body == "wooden":   # a wooden pinhole camera: two film knobs and a handle between them
-        out += [block(PAD + 44, top - 20, 70, 30), block(right - 114, top - 20, 70, 30),
-                f'<path d="M{mid - 60} {top + 2} C{mid - 60} {top - 30} {mid + 60} {top - 30} {mid + 60} {top + 2}" '
-                f'fill="none" stroke="{INK}" stroke-width="9" stroke-linecap="round"/>']
+    out += [block(PAD + 44, top - 24, 92, 34), block(right - 118, top - 14, 46, 24)]  # the winding knob, the shutter button
     return "\n".join(out)
 
 
-def main(screenshot, crop=None, body="knobs"):
+def main(screenshot, crop=None):
     cut = ["-crop", crop, "+repage"] if crop else []
     jpeg = subprocess.run(["magick", screenshot, *cut, "-resize", "2160x", "-quality", "82", "jpg:-"],
                           check=True, capture_output=True).stdout
     w, h = map(int, subprocess.run(["magick", "identify", "-format", "%w %h", "jpg:-"], input=jpeg,
                                    check=True, capture_output=True).stdout.split())
-    shot_h, HEIGHT = SHOT_H, TOP + SHOT_H + PAD
+    shot_h, shot_y, HEIGHT = SHOT_H - 2 * FRAME, TOP + FRAME, TOP + SHOT_H + PAD
     shot_w = shot_h * w / h
-    shot_x = WIDTH - PAD - shot_w
-    hole_x, hole_y = 470, TOP + shot_h / 2
-    slope = (hole_y - TOP) / (shot_x - hole_x)          # of the ray from the screenshot's top corner
+    shot_x = WIDTH - PAD - FRAME - shot_w
+    hole_x, hole_y = 470, shot_y + shot_h / 2
+    slope = (hole_y - shot_y) / (shot_x - hole_x)          # of the ray from the screenshot's top corner
     reach = (hole_x - 14 - PAD - 30) / (1 + 2 * slope * w / h)  # from the pinhole to the picture in the box
     small_h = 2 * slope * reach
     small_w = small_h * w / h
@@ -71,18 +61,18 @@ def main(screenshot, crop=None, body="knobs"):
 <rect width="{WIDTH}" height="{HEIGHT}" rx="28" fill="{YELLOW}"/>
 {text(WIDTH - PAD, 82, "A fast photo browser for Omarchy.", 27, BOLD, INK, "end")}
 {text(WIDTH - PAD, 122, "iCloud Photos and folders today. More sources coming.", 27, REGULAR, INK, "end")}
-{camera(PAD + 24, hole_x - 14, HEIGHT - PAD, hole_y, body)}
+{camera(PAD + 24, hole_x - 14, HEIGHT - PAD, hole_y)}
 {name(small_x, small_y - 44, small_w)}
 <path d="M{hole_x} {hole_y} L{small_x + small_w:.1f} {small_y:.1f} L{small_x + small_w:.1f} {small_y + small_h:.1f} Z" fill="{YELLOW}" opacity="0.3"/>
 <use xlink:href="#shot" opacity="0.8" transform="translate({small_x + small_w:.1f} {small_y + small_h:.1f}) rotate(180) scale({small_w / shot_w:.4f})"/>
-<path d="M{shot_x:.1f} {TOP} L{hole_x} {hole_y} L{shot_x:.1f} {HEIGHT - PAD}" stroke="{INK}" stroke-width="2.5" fill="none"/>
+<path d="M{shot_x:.1f} {shot_y} L{hole_x} {hole_y} L{shot_x:.1f} {shot_y + shot_h}" stroke="{INK}" stroke-width="2.5" fill="none"/>
 <circle cx="{hole_x}" cy="{hole_y}" r="7" fill="{YELLOW}"/>
-<rect x="{shot_x - 6:.1f}" y="{TOP - 6}" width="{shot_w + 12:.1f}" height="{shot_h + 12}" rx="14" fill="{INK}"/>
-<use xlink:href="#shot" x="{shot_x:.1f}" y="{TOP}"/>
+<rect x="{shot_x - FRAME:.1f}" y="{TOP}" width="{shot_w + 2 * FRAME:.1f}" height="{SHOT_H}" rx="14" fill="{INK}"/>
+<use xlink:href="#shot" x="{shot_x:.1f}" y="{shot_y}"/>
 </svg>
 '''
     Path(__file__).with_name("obscura.svg").write_text(out)
 
 
 if __name__ == "__main__":
-    main(*sys.argv[1:4])
+    main(*sys.argv[1:3])
