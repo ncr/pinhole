@@ -195,6 +195,12 @@ class Checks:
             library = self.fixture(scratch, 512)
             env = self.profile(scratch) | {'QT_QPA_PLATFORM': 'xcb', 'LIBGL_ALWAYS_SOFTWARE': '1',
                                            'QSG_RHI_BACKEND': 'opengl'}
+            # The plugins that start off are on, as app/bin/test-selftests has
+            # them: lazyplugins looks into Calendar and Frame.
+            manifests = [json.loads(m.read_text()) for m in (ROOT / 'plugins').glob('*/manifest.json')]
+            (scratch / 'config/pinhole').mkdir(parents=True, exist_ok=True)
+            (scratch / 'config/pinhole/plugins.json').write_text(json.dumps(
+                {'enabled': {m['id']: True for m in manifests if m.get('startsOff')}}))
             self.run('grid-render', ['xvfb-run', '-a', '-s', '-screen 0 1600x1000x24',
                                     'app/build/tests/pinhole_tests', 'anOversizedGridCellUpgradesAPreviewToTheFullPhoto'], env=env)
             places = self.output / 'places'
