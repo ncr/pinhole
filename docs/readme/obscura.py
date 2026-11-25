@@ -12,17 +12,21 @@ from pathlib import Path
 from keys import BOLD, REGULAR, text
 
 YELLOW, INK = "#FFD60A", "#1a1a1c"
-WIDTH, PAD, TOP, SHOT_H = 1680, 36, 176, 250  # TOP: where the drawing starts, under the name and its two lines
+WIDTH, PAD, TOP, SHOT_H = 1680, 36, 128, 236  # TOP: where the screenshot starts, under the two lines
 NAME = Path(__file__).with_name("BricolageGrotesque-ExtraBold.ttf")  # the name's typeface, if it is here
 
 
-def name(x, y, size):
+def name(x, y, width):
+    """The name on the camera's body, as wide as the picture inside it."""
     if NAME.exists():
         from fontTools.ttLib import TTFont
-        return text(x, y, "Pinhole", size, TTFont(NAME), INK)
+        font = TTFont(NAME)
+        cmap, em = font.getBestCmap(), font["head"].unitsPerEm
+        return text(x, y, "Pinhole", width * em / sum(font["hmtx"][cmap[ord(c)]][0] for c in "Pinhole"), font, YELLOW)
     # without the file: plain text, right only in a browser that has the typeface
-    return (f'<text x="{x}" y="{y}" font-family="Bricolage Grotesque, sans-serif" font-weight="800" '
-            f'font-size="{size}" letter-spacing="-5" fill="{INK}">Pinhole</text>')
+    return (f'<text x="{x:.1f}" y="{y}" font-family="Bricolage Grotesque, sans-serif" font-weight="800" '
+            f'font-size="{width / 3.02:.0f}" textLength="{width:.1f}" lengthAdjust="spacingAndGlyphs" '
+            f'fill="{YELLOW}">Pinhole</text>')
 
 
 
@@ -46,10 +50,10 @@ def main(screenshot, crop=None):
 <title>Pinhole, seen through a camera obscura</title>
 <defs><image id="shot" width="{shot_w:.1f}" height="{shot_h}" preserveAspectRatio="none" xlink:href="data:image/jpeg;base64,{data}"/></defs>
 <rect width="{WIDTH}" height="{HEIGHT}" rx="28" fill="{YELLOW}"/>
-{name(PAD - 6, 132, 132)}
-{text(WIDTH - PAD, 76, "A fast photo browser for Omarchy.", 27, BOLD, INK, "end")}
-{text(WIDTH - PAD, 120, "iCloud Photos and folders today. More sources coming.", 27, REGULAR, INK, "end")}
-<rect x="{PAD}" y="{TOP}" width="{hole_x - PAD}" height="{shot_h}" rx="22" fill="{INK}"/>
+{text(WIDTH - PAD, 62, "A fast photo browser for Omarchy.", 27, BOLD, INK, "end")}
+{text(WIDTH - PAD, 102, "iCloud Photos and folders today. More sources coming.", 27, REGULAR, INK, "end")}
+<rect x="{PAD}" y="{PAD}" width="{hole_x - PAD}" height="{HEIGHT - 2 * PAD}" rx="22" fill="{INK}"/>
+{name(small_x, small_y - 44, small_w)}
 <path d="M{hole_x} {hole_y} L{hole_x - reach:.1f} {small_y:.1f} L{hole_x - reach:.1f} {small_y + small_h:.1f} Z" fill="{YELLOW}" opacity="0.3"/>
 <use xlink:href="#shot" opacity="0.8" transform="translate({small_x + small_w:.1f} {small_y + small_h:.1f}) rotate(180) scale({small_w / shot_w:.4f})"/>
 <path d="M{shot_x:.1f} {TOP} L{hole_x} {hole_y} L{shot_x:.1f} {HEIGHT - PAD}" stroke="{INK}" stroke-width="2.5" fill="none"/>
