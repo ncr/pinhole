@@ -225,9 +225,16 @@ PinholePlugin {
         find()
     }
 
-    // The photo shown full window: is it one?
-    readonly property bool shownIsScreen: pinhole.viewer.open && pinhole.viewer.index >= 0
-                                          && isScreen(pinhole.viewer.id)
+    // The photos ticked: are they all ones?
+    readonly property bool tickedAreScreens: (pinhole.library.revision, pinhole.selectionCount > 0
+                                              && allScreens(pinhole.selection()))
+    function allScreens(picked) {
+        const set = new Set(ids)
+        for (const i of picked)
+            if (!set.has(pinhole.library.item(i).id))
+                return false
+        return true
+    }
 
     actions: [
         PluginAction {
@@ -250,13 +257,15 @@ PinholePlugin {
             active: true
             onTriggered: plugin.setHiding(false)
         },
-        // On a photo: said to be one, or not.
+        // Of what is ticked: said to be one, or not. Not on a photo shown,
+        // where a button on every photo would be one too many.
         PluginAction {
-            place: "viewer"
+            place: "selection"
             text: qsTr("Photo of a screen")
-            helpText: qsTr("Say a photo is of a screen, or is not")
-            active: plugin.shownIsScreen
-            onTriggered: plugin.say(photos, !plugin.shownIsScreen)
+            helpText: qsTr("Say the photos ticked are of a screen, or are not")
+            usable: pinhole.selectionCount > 0
+            active: plugin.tickedAreScreens
+            onTriggered: plugin.say(photos, !plugin.tickedAreScreens)
         }
     ]
 

@@ -942,8 +942,13 @@ Plugins::Findings Plugins::footguns(const QString &dir) {
                 if (together < 2 || first == actions.end() || first->line != member.line)
                     continue;
                 const QString menu = portableKey(QStringLiteral("Shift+") + member.key);
+                // One of the group itself having it, the menu has no key
+                // (PluginGroup.qml): its own keys are the way to each.
+                const bool inGroup = std::any_of(actions.begin(), actions.end(), [&](const Keyed &a) {
+                    return a.place == member.place && a.group == member.group && portableKey(a.key) == menu;
+                });
                 for (const Keyed &other : std::as_const(actions))
-                    if (other.place == member.place && !other.key.isEmpty() && portableKey(other.key) == menu)
+                    if (!inGroup && other.place == member.place && !other.key.isEmpty() && portableKey(other.key) == menu)
                         found.errors << QStringLiteral("%1:%2: %3 opens the menu of group \"%4\" (Shift and %5, its button's "
                                                        "key), and is this action's key too: neither works. Give it another, "
                                                        "or take it out of the group")

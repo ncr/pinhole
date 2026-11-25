@@ -329,6 +329,20 @@ PinholePlugin {
     // the photo given, the photos given, or all of them; Esc puts a place's
     // photos away before it closes (PhotoPlaces' back()). Open already, it
     // stays as it was.
+    // On a photo shown, M is a key and no button (Info has the map):
+    // the photo's place, or back to the map it was opened from.
+    Command {
+        name: "info.mapOfShown"
+        text: qsTr("Map")
+        section: "plugin"
+        keys: ["M"]
+        keyLayer: "viewer"
+        mouse: qsTr("The map in Info")
+        touchpad: qsTr("The map in Info")
+        usable: pinhole.viewer.open && pinhole.viewer.index >= 0
+        onTriggered: plugin.mapOf([pinhole.viewer.id])
+    }
+
     PluginView {
         id: mapView
         objectName: "infoMapView"
@@ -387,7 +401,8 @@ PinholePlugin {
     actions: [
         PluginAction {
             id: mapAction
-            places: ["grid", "viewer", "selection"]
+            // Not on a photo: its Info shows where it was taken, with the map.
+            places: ["grid", "selection"]
             text: qsTr("Map")
             key: "M"
             shown: pinhole.library.count > 0

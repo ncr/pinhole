@@ -75,14 +75,26 @@ PinholePlugin {
     actions: [
         PluginAction {
             place: "viewer"
+            group: "edit"
             order: 10
             text: qsTr("Turn")
             key: "R"
             shown: plugin.editable
             onTriggered: plugin.turn([pinhole.viewer.index], 1)
         },
+        // A quarter back, in Turn's menu.
         PluginAction {
             place: "viewer"
+            group: "edit"
+            order: 10
+            text: qsTr("Turn back")
+            key: "Shift+R"
+            shown: plugin.editable
+            onTriggered: plugin.turn([pinhole.viewer.index], -1)
+        },
+        PluginAction {
+            place: "viewer"
+            group: "edit"
             order: 11
             text: qsTr("Crop")
             key: "K"
@@ -91,6 +103,7 @@ PinholePlugin {
         },
         PluginAction {
             place: "viewer"
+            group: "edit"
             order: 12
             text: qsTr("Original")
             key: "Shift+K"
@@ -112,18 +125,5 @@ PinholePlugin {
     ]
     help: [["R", qsTr("Turn the photo a quarter; ⇧ R back")], ["K", qsTr("Crop the photo")],
            ["⇧ K", qsTr("The photo as it was taken again")]]
-    // A quarter back: a key, beside Turn's button.
-    Command {
-        name: "edit.turnBack"
-        text: qsTr("Turn back")
-        section: "plugin"
-        keys: ["Shift+R"]
-        keyLayer: "viewer"
-        noMouse: qsTr("Turn three times")
-        noTouchpad: qsTr("Turn three times")
-        usable: plugin.editable
-        onTriggered: plugin.turn([pinhole.viewer.index], -1)
-    }
-
     PluginView { id: cropping; objectName: "cropping"; source: "Crop.qml"; toggleKey: "K"; closeText: qsTr("Leave it as it was") }
 }
