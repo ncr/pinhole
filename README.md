@@ -1,8 +1,6 @@
 <img src="docs/readme/keys.svg" alt="Pinhole's keyboard: R turn, T theme, Y calendar, I info, O send, P frame, S select, D on this day, F favourite, G series, H mosaic, K crop, L live, C copy, B background, N newest, M map" width="100%">
 
-A fast photo browser for Omarchy. Working name.
-
-<img src="docs/readme/obscura.svg" alt="iCloud Photos and folders today. More sources coming. Pinhole's rainbow wall, seen through a camera obscura" width="100%">
+A fast photo browser for Omarchy: iCloud Photos and folders today, more sources coming. Working name.
 
 Pinhole keeps a small index of the whole library on disk and fetches the rest from its source only when you look
 at it, drag it or export it. It adds the photos you drop on its window.
