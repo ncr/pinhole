@@ -856,7 +856,9 @@ ApplicationWindow {
 
     // Plugins' buttons for the grid, before Select (not in select mode,
     // which has its own), right of the date: their keys go when they do
-    // not fit there, then they fold into More ▾ (`fit`).
+    // not fit there, then they fold into More ▾ (`fit`). More than two,
+    // they fold anyway: a row of views over the photos is noise. Those
+    // lit (what is hidden, and the way back) and of `order` below 0 stand.
     Row {
         id: gridActions
         objectName: "gridActions"
@@ -868,6 +870,9 @@ ApplicationWindow {
         anchors.rightMargin: selectButton.visible ? 6 : 16
         spacing: 6
         readonly property var actions: win.pluginActions.filter(a => a.place === "grid")
+        function stands(a) { return a.active || a.order < 0 }
+        readonly property var folding: actions.filter(a => !stands(a))
+        readonly property bool many: folding.filter(a => a.shown).length > 2
         // 0: as they are; 1: without their keys; 2: in More ▾. The first
         // that fits from the words (ShellButton.qml's measures), as select
         // mode's bar does.
@@ -878,7 +883,7 @@ ApplicationWindow {
             const date = dateLabel.visible ? Math.ceil(dateLabel.naturalWidth / step) * step : 0
             const right = selectButton.visible ? win.width - selectButton.x + 6 : 16
             const room = win.width - right - (dateLabel.visible ? dateLabel.x + date + 8 : 16)
-            for (let level = 0; level < 2; ++level)
+            for (let level = 0; level < (many ? 0 : 2); ++level)
                 if (widthAt(level) <= room)
                     return level
             return 2
@@ -899,7 +904,7 @@ ApplicationWindow {
                 id: gridAction
                 required property var modelData
                 floating: true
-                visible: modelData.shown && gridActions.fit < 2
+                visible: modelData.shown && (gridActions.fit < 2 || gridActions.stands(modelData))
                 usable: modelData.usable
                 active: modelData.active
                 labelColor: modelData.textColour !== "" ? win.markColour(modelData.textColour) : theme.foreground
@@ -944,7 +949,7 @@ ApplicationWindow {
             objectName: "gridMore"
             visible: gridActions.fit >= 2 && menuItems.length > 0
             floating: true
-            groups: gridActions.actions.map(a => [a])
+            groups: gridActions.folding.map(a => [a])
             keyLayer: "grid"
         }
     }
