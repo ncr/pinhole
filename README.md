@@ -3,7 +3,7 @@
 A fast photo browser for Omarchy: iCloud Photos on demand, or a folder of photos on this computer. Working name.
 
 Pinhole keeps a small index of the whole library on disk and fetches the rest from iCloud only when you look at
-it, drag it or export it. It adds the photos you drop on its window. It never deletes.
+it, drag it or export it. It adds the photos you drop on its window.
 
 ## Install
 
@@ -46,6 +46,12 @@ imagine them. With AI an idea is enough to start building, and that is pure joy.
 
 Each one in full is in [What Pinhole does](docs/features.md). A plugin of your own is a folder with a
 manifest.json and a QML file: start with [the quick start](docs/plugin-quickstart.md).
+
+## Not here yet
+
+Pinhole is young, and some basics are not built: deleting a photo, albums, the iCloud shared library, and any
+edit beyond turn and crop. For those you still need Apple's Photos. So nothing in Pinhole can remove a photo from
+your library.
 
 ## More
 
