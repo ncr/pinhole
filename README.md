@@ -56,9 +56,9 @@ remove a photo from your library.
 
 ## Sources
 
-iCloud Photos and folders work today. Google Photos, Immich, a NAS or a phone can each be added as a plugin, and
-nobody has made one yet. If that is where your photos are, a pull request is very welcome:
-[the prompt below](#make-your-own) builds one.
+- **Work today:** iCloud Photos, folders.
+- **Not made yet:** Google Photos, Immich, a NAS, a phone. Each can be added as a plugin.
+- **Yours is missing?** A pull request is very welcome: [the prompt below](#make-your-own) builds one.
 
 ## Make your own
 
