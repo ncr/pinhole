@@ -16,7 +16,7 @@ no people in them.
 <img src="info.webp" alt="Info at work in Pinhole" width="100%">
 
 <img src="send-to-phone.svg" alt="Send to phone, O: Sends photos to a phone or computer nearby that has LocalSend open." width="100%">
-<img src="coming.svg" alt="A clip of this plugin is still to be recorded" width="100%">
+<img src="send-to-phone.webp" alt="Send to phone at work in Pinhole" width="100%">
 
 <img src="screenshots.svg" alt="Screenshots, ⇧ S: Screenshots folded into one card a day, or out of the grid altogether." width="100%">
 <img src="screenshots.webp" alt="Screenshots at work in Pinhole" width="100%">
@@ -28,10 +28,10 @@ no people in them.
 <img src="coming.svg" alt="A clip of this plugin is still to be recorded" width="100%">
 
 <img src="live-photos.svg" alt="Live Photos, L: A Live Photo moves, and plays as a loop, a bounce or a long exposure." width="100%">
-<img src="coming.svg" alt="A clip of this plugin is still to be recorded" width="100%">
+<img src="live-photos.webp" alt="Live Photos at work in Pinhole" width="100%">
 
 <img src="map.svg" alt="Map, M: Your photos on a map, drawn in your theme's colours." width="100%">
-<img src="coming.svg" alt="A clip of this plugin is still to be recorded" width="100%">
+<img src="map.webp" alt="Map at work in Pinhole" width="100%">
 
 <img src="on-this-day.svg" alt="On this day, D: What you photographed on this date in earlier years." width="100%">
 <img src="on-this-day.webp" alt="On this day at work in Pinhole" width="100%">
@@ -49,7 +49,7 @@ no people in them.
 <img src="photo-frame.webp" alt="Photo frame at work in Pinhole" width="100%">
 
 <img src="background.svg" alt="Background, B: The photo you are looking at becomes the desktop background." width="100%">
-<img src="coming.svg" alt="A clip of this plugin is still to be recorded" width="100%">
+<img src="background.webp" alt="Background at work in Pinhole" width="100%">
 
 <img src="theme.svg" alt="Theme, T: A whole Omarchy theme made from one photo's colours. Ctrl Z goes back." width="100%">
 <img src="theme.webp" alt="Theme at work in Pinhole" width="100%">
