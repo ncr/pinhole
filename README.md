@@ -2,8 +2,9 @@
 
 <img src="docs/readme/keys.svg" alt="Pinhole's keyboard: W rainbow wall, R turn, T theme, Y calendar, I info, O send, P frame, S select, D on this day, F favourite, G series, H mosaic, K crop, L live, C copy, B background, N newest, M map" width="100%">
 
-Pinhole keeps a small index of the whole library on disk and fetches the rest from its source only when you look
-at it, drag it or export it. It adds the photos you drop on its window.
+See your iCloud Photos on Omarchy: the whole library in one fast grid, with your favourites, Live Photos, people
+and places, and every view a key away. A folder of photos works too. Photos kept somewhere else (Google Photos,
+Immich, a NAS) are not there yet: see [Sources](#sources).
 
 ## Install
 
@@ -11,20 +12,11 @@ at it, drag it or export it. It adds the photos you drop on its window.
 git clone https://github.com/ncr/pinhole && pinhole/bin/install
 ```
 
-For Arch Linux, made for and tried on Omarchy. The first build takes several minutes. Then open Pinhole, press
-<kbd>Tab</kbd> and add a source. For 50,000 photos the index builds in about 5 minutes and every
-thumbnail in about 6 more, and the grid fills as it does. <kbd>?</kbd> lists every shortcut.
+For Arch Linux, made for and tried on Omarchy. Installing takes several minutes the first time. Then open
+Pinhole, press <kbd>Tab</kbd> and add your Apple ID or a folder. A big library takes a few minutes to appear, and
+the grid fills as it does. <kbd>?</kbd> lists every shortcut.
 
 More in [Installing Pinhole](docs/install.md): what the installer does, the bar widget, updates, uninstalling.
-
-## Sources
-
-iCloud Photos and folders are built in. Any other source is a plugin: Immich, a NAS, a phone, another cloud. Its
-provider is a program in any language that tells Pinhole what photos there are; Pinhole does the index, the
-thumbnails and the cache.
-
-Do you keep your photos somewhere else? A pull request with your source is very welcome:
-[the prompt below](#make-your-own) builds one.
 
 ## Plugins
 
@@ -56,10 +48,22 @@ imagine them. With AI an idea is enough to start building, and that is pure joy.
 
 Each one in full is in [What Pinhole does](docs/features.md).
 
+## Not here yet
+
+Pinhole is young, and some basics are not built: deleting a photo, albums, the iCloud shared library, and any
+edit beyond turn and crop. For those you still need the app your photos come from. So nothing in Pinhole can
+remove a photo from your library.
+
+## Sources
+
+iCloud Photos and folders work today. Google Photos, Immich, a NAS or a phone can each be added as a plugin, and
+nobody has made one yet. If that is where your photos are, a pull request is very welcome:
+[the prompt below](#make-your-own) builds one.
+
 ## Make your own
 
-A plugin is a folder with a manifest.json and a QML file, loaded again whenever you save it. Paste this into your
-AI coding agent (Claude Code, Codex, OpenCode…):
+A new view, a tool or a source of photos is a plugin, and an AI coding agent can build one. Paste this into yours
+(Claude Code, Codex, OpenCode…):
 
 ```text
 Build a Pinhole plugin for me. If I want to share it, open a pull request against
@@ -85,12 +89,6 @@ github.com/ncr/pinhole with it.
 ```
 
 Something that does not work is worth a pull request too: it saves the next person the afternoon.
-
-## Not here yet
-
-Pinhole is young, and some basics are not built: deleting a photo, albums, the iCloud shared library, and any
-edit beyond turn and crop. For those you still need the app your photos come from. So nothing in Pinhole can
-remove a photo from your library.
 
 ## More
 
