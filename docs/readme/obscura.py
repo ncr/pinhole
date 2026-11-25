@@ -9,8 +9,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+from keys import BOLD, text
+
 YELLOW, INK = "#FFD60A", "#1a1a1c"
-WIDTH, HEIGHT, PAD = 1680, 560, 44
+WIDTH, HEIGHT, PAD, TOP = 1680, 644, 44, 128  # TOP: where the drawing starts, under the line of text
 
 
 def main(screenshot):
@@ -18,11 +20,11 @@ def main(screenshot):
                           check=True, capture_output=True).stdout
     w, h = map(int, subprocess.run(["magick", "identify", "-format", "%w %h", screenshot],
                                    check=True, capture_output=True, text=True).stdout.split())
-    shot_h = HEIGHT - 2 * PAD
+    shot_h = HEIGHT - TOP - PAD
     shot_w = shot_h * w / h
     shot_x = WIDTH - PAD - shot_w
-    hole_x, hole_y = 540, HEIGHT / 2
-    slope = (hole_y - PAD) / (shot_x - hole_x)          # of the ray from the screenshot's top corner
+    hole_x, hole_y = 540, TOP + shot_h / 2
+    slope = (hole_y - TOP) / (shot_x - hole_x)          # of the ray from the screenshot's top corner
     reach = (hole_x - PAD - 40) / (1 + 2 * slope * w / h)  # from the pinhole to the picture in the box
     small_h = 2 * slope * reach
     small_w = small_h * w / h
@@ -32,13 +34,15 @@ def main(screenshot):
 <title>Pinhole, seen through a camera obscura</title>
 <defs><image id="shot" width="{shot_w:.1f}" height="{shot_h}" preserveAspectRatio="none" xlink:href="data:image/jpeg;base64,{data}"/></defs>
 <rect width="{WIDTH}" height="{HEIGHT}" rx="28" fill="{YELLOW}"/>
-<rect x="{PAD}" y="{PAD}" width="{hole_x - PAD}" height="{shot_h}" rx="28" fill="{INK}"/>
+{text(PAD, 86, "iCloud Photos and folders today.", 34, BOLD, INK)}
+{text(WIDTH - PAD, 86, "More sources coming.", 34, BOLD, INK, "end")}
+<rect x="{PAD}" y="{TOP}" width="{hole_x - PAD}" height="{shot_h}" rx="28" fill="{INK}"/>
 <path d="M{hole_x} {hole_y} L{hole_x - reach:.1f} {small_y:.1f} L{hole_x - reach:.1f} {small_y + small_h:.1f} Z" fill="{YELLOW}" opacity="0.3"/>
 <use xlink:href="#shot" opacity="0.8" transform="translate({small_x + small_w:.1f} {small_y + small_h:.1f}) rotate(180) scale({small_w / shot_w:.4f})"/>
-<path d="M{shot_x:.1f} {PAD} L{hole_x} {hole_y} L{shot_x:.1f} {HEIGHT - PAD}" stroke="{INK}" stroke-width="2.5" fill="none"/>
+<path d="M{shot_x:.1f} {TOP} L{hole_x} {hole_y} L{shot_x:.1f} {HEIGHT - PAD}" stroke="{INK}" stroke-width="2.5" fill="none"/>
 <circle cx="{hole_x}" cy="{hole_y}" r="9" fill="{YELLOW}"/>
-<rect x="{shot_x - 6:.1f}" y="{PAD - 6}" width="{shot_w + 12:.1f}" height="{shot_h + 12}" rx="14" fill="{INK}"/>
-<use xlink:href="#shot" x="{shot_x:.1f}" y="{PAD}"/>
+<rect x="{shot_x - 6:.1f}" y="{TOP - 6}" width="{shot_w + 12:.1f}" height="{shot_h + 12}" rx="14" fill="{INK}"/>
+<use xlink:href="#shot" x="{shot_x:.1f}" y="{TOP}"/>
 </svg>
 '''
     Path(__file__).with_name("obscura.svg").write_text(out)
