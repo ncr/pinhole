@@ -134,8 +134,10 @@ search over the whole window: describe a photo in English or Polish and the
 best matches come first. ⏎ opens the best one, and ← → go through the
 answers alone; Esc comes back to them. A line under the question says how
 much of the library can be found yet. The local
-profiles use WeMM 4B on NVIDIA CUDA, CLIP on Apple Silicon with ANE,
-or WeMM 4B on Apple GPUs with Asahi Vulkan when explicitly enabled.
+profiles use WeMM 4B on an NVIDIA card or the processor, CLIP on Apple
+Silicon with ANE, or WeMM 4B on Apple GPUs with Asahi Vulkan when explicitly
+enabled. Without a suitable NVIDIA card, or with one other programs fill,
+search runs on the processor and the line says so before anything is asked.
 
 [People](../plugins/people/README.md) groups similar faces in thumbnails
 automatically in pinholed, even after the window closes. Shift+F shows the

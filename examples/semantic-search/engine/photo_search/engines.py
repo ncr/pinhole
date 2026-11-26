@@ -87,7 +87,22 @@ class AneEngine(LegacyEngine):
                 self.runtime = None
 
 
+def log(*words):
+    """What went wrong in full, for Pinhole's log: the person reads a line."""
+    import sys
+
+    print("photo search:", *words, file=sys.stderr, flush=True)
+
+
 class CudaEngine:
+    """WeMM on the NVIDIA card where it fits, else on the processor.
+
+    A search loads only the language layers (6.8 GiB of the card) and only
+    with 2 GiB to spare for everything else; with less, or no suitable card,
+    it runs on the processor, a quarter of a second a question, its weights
+    read from the mapped checkpoint. Photos are indexed on the card, waiting
+    for room on it, or on the processor where there is no suitable card.
+    """
     dimensions = {"wemm": DIMENSION}
     benchmark_import = False
     idle_seconds = 60
@@ -95,49 +110,120 @@ class CudaEngine:
     def __init__(self, args):
         self.args = args
         self.model = None
+        # Where the model loaded is: "cuda" or "cpu".
+        self.device = None
+        # The card as last looked at (wemm.card), and the reason said last.
+        self.card = None
+        self.said = None
+        self.look()
 
     def identity(self):
         from .wemm import identity
 
         return identity()
 
-    def check_indexing(self):
-        import torch
+    def look(self):
+        from .wemm import card
 
-        if not torch.cuda.is_available() or not torch.cuda.is_bf16_supported(including_emulation=False):
-            raise RuntimeError("WeMM requires a CUDA GPU with native BF16 support")
+        self.card = card()
+        if self.card.reason != self.said:
+            self.said = self.card.reason
+            log(f"graphics card: {self.card.reason or 'fits'} ({self.card.detail})")
+        return self.card
+
+    def no_card(self):
+        from .wemm import NO_CARD
+
+        return self.card.reason in NO_CARD
+
+    def where(self):
+        """Where the next question is answered: "card" or "processor"."""
+        if self.model is not None:
+            return "card" if self.device == "cuda" else "processor"
+        return "card" if self.card.reason is None else "processor"
+
+    def describe(self):
+        return {"search_on": self.where(), "card": self.card.reason}
+
+    def check_indexing(self):
+        pass
 
     def can_index(self):
+        from .wemm import GIB, IMAGE_CARD_BYTES, KEEP_CARD_BYTES, VISION_CARD_BYTES
+
         if not getattr(self.args, "background", False):
             return True
-        import torch
+        if self.device == "cuda":
+            import torch
 
-        free, _ = torch.cuda.mem_get_info()
-        if self.model is not None:
-            return free >= 768 * 1024 ** 2
-        return free >= 11 * 1024 ** 3
+            free, _ = torch.cuda.mem_get_info()
+            return free >= KEEP_CARD_BYTES + (0 if self.model.vision else VISION_CARD_BYTES)
+        self.look()
+        if self.no_card():
+            from .wemm_vulkan import available_memory_kib
 
-    def encoder(self):
-        if self.model is None:
-            from .wemm import WeMM
+            # The weights are read from the mapped file; what the process
+            # itself takes is under a GiB.
+            return available_memory_kib() * 1024 >= 2 * GIB
+        return self.card.free >= IMAGE_CARD_BYTES
 
-            self.model = WeMM(self.args.models)
+    def load(self, device):
+        from .wemm import WeMM
+
+        self.close()
+        self.model, self.device = WeMM(self.args.models, device), device
+        log(f"WeMM loaded on the {'card' if device == 'cuda' else 'processor'}")
         return self.model
 
+    def encoder(self, images=False):
+        from .wemm import out_of_memory
+
+        if images:
+            device = "cpu" if self.no_card() else "cuda"
+            if self.model is not None and self.device == device:
+                return self.model
+        elif self.model is not None:
+            return self.model
+        else:
+            device = "cuda" if self.look().reason is None else "cpu"
+        try:
+            return self.load(device)
+        except Exception as error:
+            if device != "cuda" or images:
+                raise
+            # Taken by another program since, or a driver that does not
+            # start: the question is answered on the processor.
+            log(f"WeMM could not load on the card, so search runs on the processor: {error!r}")
+            self.close()
+            if not out_of_memory(error):
+                self.card.reason = self.said = "driver"
+            return self.load("cpu")
+
     def encode_image(self, image):
-        return self.encoder().images([image])[0]
+        return self.encoder(images=True).images([image])[0]
 
     def encode_text(self, texts):
-        return self.encoder().texts(texts)
+        from .wemm import out_of_memory
+
+        model = self.encoder()
+        try:
+            return model.texts(texts)
+        except Exception as error:
+            if self.device != "cuda" or not out_of_memory(error):
+                raise
+            log(f"the card ran out of memory for a question, so search runs on the processor: {error!r}")
+            self.card.reason = "busy"
+            return self.load("cpu").texts(texts)
 
     def loaded(self):
         return self.model is not None
 
     def close(self):
         if self.model is not None:
-            torch = self.model.torch
-            self.model = None
-            torch.cuda.empty_cache()
+            torch, device = self.model.torch, self.device
+            self.model = self.device = None
+            if device == "cuda":
+                torch.cuda.empty_cache()
 
 
 class VulkanEngine:
@@ -218,7 +304,7 @@ def local_profile(checkout):
         environment = base / "wemm-cuda"
         python = environment / ".venv/bin/python"
         if os.access(python, os.X_OK) and (environment / "weights/model.safetensors").is_file():
-            return {"name": "WeMM 4B · NVIDIA CUDA", "python": str(python),
+            return {"name": "WeMM 4B · NVIDIA card or processor", "python": str(python),
                     "indexFile": "wemm-4b-cuda-v1.sqlite", "benchmark": None,
                     "args": ["--model", "wemm", "--backend", "cuda", "--models", str(environment / "weights"),
                              "--threads", "2"]}

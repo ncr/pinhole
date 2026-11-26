@@ -7,7 +7,8 @@ closed. Ctrl F connects to the same worker. A library opened separately
 with `--library` uses a window-owned worker. The model stays off the
 first-frame path.
 
-On a CUDA host the optional WeMM 4B environment selects the WeMM recipe.
+On Linux x86-64 the optional WeMM 4B environment selects the WeMM recipe,
+on an NVIDIA card where it fits and on the processor otherwise.
 Both image and text embeddings use the same resident BF16 model and the
 original query language. A separate per-source index keeps WeMM vectors
 apart from previous CLIP results. On the Mac the corrected CLIP hybrid
@@ -20,8 +21,8 @@ not the retrieval-quality winner or a measured speed improvement. See
 
 ## Dependencies and local setup
 
-On Linux x86-64 with an NVIDIA GPU that supports native BF16 and about
-11 GiB free VRAM, install `uv` and run from the checkout:
+On Linux x86-64, with or without an NVIDIA card, install `uv` and run from
+the checkout:
 
 ```sh
 examples/semantic-search/engine/setup-photo-search-wemm
@@ -30,9 +31,29 @@ examples/semantic-search/engine/setup-photo-search-wemm
 Use `--snapshot /path/to/weights` to reuse an existing copy of the pinned
 Tencent weights and tokenizer. Setup verifies their SHA-256 hashes.
 The worker loads the local checkpoint when indexing or answering a query
-against an existing index. It waits for about 11 GiB of free GPU memory
-before loading WeMM for background indexing, and unloads the model on
-pause or after one minute without inference when indexing is finished.
+against an existing index, and unloads it on pause or after one minute
+without inference when indexing is finished.
+
+The 9.6 GiB checkpoint is never loaded whole. Its tensors are read from the
+mapped file part by part: a search puts only the language layers on the card
+(6.8 GiB allocated, 7.2 GiB for the process in `nvidia-smi`, measured on an
+RTX 5080 on 2026-11-26); indexing adds the 0.6 GiB vision tower; the 1.2 GiB
+token table stays in the mapped file, a row read per word; the 1.2 GiB head
+that predicts words is never read. Before this, Transformers asked the card
+for the whole checkpoint in one 9.64 GiB block, which failed whenever other
+programs held more than 6 GiB of a 16 GiB card.
+
+A search uses the card only when it leaves 2 GiB free for the rest of the
+desktop (9.2 GiB free before loading), as `nvidia-smi` says without making a
+CUDA context. Otherwise, or when the card fills up during a question, it runs
+on the processor: about 0.27 s a question on two threads of a Ryzen 7 9800X3D,
+0.7 GB of the process's own memory, the weights shared from the page cache;
+its vectors match the card's (cosine 0.9999). Indexing waits for 8.6 GiB free
+on the card (an estimate from the parts, not yet measured on a free card), or, with no NVIDIA card that can run WeMM (no driver, older than
+Ampere, under 9.2 GiB in all), runs on the processor: about 2.2 s a photo on
+two threads, vectors within cosine 0.999 of those made on the card. The
+panel and the side panel say in a line where search runs when it is not the
+card; the error itself goes to the log.
 
 The host must support plugin API 9. On an Apple Silicon Mac running Linux, use the
 environment and pinned models described in the full-encoder notes.

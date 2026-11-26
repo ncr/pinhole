@@ -7,6 +7,7 @@ from pathlib import Path
 import signal
 import socket
 import stat
+import sys
 import time
 
 import numpy as np
@@ -15,6 +16,7 @@ from .ane import hash_file
 from .engines import create_engine
 from .managed import CATALOG_PAGE
 from .store import Store
+from .wemm import out_of_memory
 
 MAX_MESSAGE = 24 << 20
 # Pinhole open asks for the model every 20 seconds (warm); it is held this
@@ -164,7 +166,8 @@ class Worker:
                                       "yielding": self.yielding and self.running,
                                       "catalog_ready": self.catalog_ready, "managed": bool(getattr(self.args, "managed_plugins", None)),
                                       "processed": self.processed, "skipped": self.skipped,
-                                      "error": self.last_error, "backend": self.args.backend}
+                                      "error": self.last_error, "backend": self.args.backend} | (
+                                          self.engine.describe() if hasattr(self.engine, "describe") else {})
 
     def refresh(self, assets=None):
         """Check indexed local files (all, or those of `assets`, ids);
@@ -444,8 +447,21 @@ class Worker:
             self.store.put(asset, digest, vector)
             self.processed += 1
         except Exception as error:
-            # A model/device failure ends the whole job, never silently
-            # substituting a CPU backend or labelling a partial run complete.
+            if out_of_memory(error):
+                # The card filled up since it was looked at: the photo
+                # waits, as for room, the model given back.
+                print(f'photo search: the card ran out of memory indexing; waiting: {error!r}',
+                      file=sys.stderr, flush=True)
+                self.pending.appendleft((asset, relative))
+                self.waiting = True
+                if self.engine.idle_seconds is not None:
+                    self.engine.close()
+                    self.last_inference = None
+                return
+            # A model/device failure ends the whole job, never labelling a
+            # partial run complete. The panel says it in a line; the error
+            # itself goes to the log.
+            print(f'photo search: indexing stopped: {error!r}', file=sys.stderr, flush=True)
             self.last_error = str(error)
             self.stop()
             # Broken, not idle: let go even if held, to start afresh.

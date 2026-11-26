@@ -307,8 +307,10 @@ class WorkerTests(unittest.TestCase):
         vector[0, 0] = 1
         encoder.images.return_value = encoder.texts.return_value = vector
         image = object()
-        with closing(Worker(args)) as worker, \
-                patch.object(worker.engine, 'check_indexing'), \
+        from photo_search.wemm import Card
+        fits = Card(None, 'a card with room', 12 << 30, 16 << 30)
+        with patch('photo_search.wemm.card', return_value=fits), patch('photo_search.engines.log'), \
+                closing(Worker(args)) as worker, \
                 patch('photo_search.wemm.WeMM', return_value=encoder) as load, \
                 patch('photo_search.models.load_image', return_value=image):
             worker.request({'op': 'catalog', 'assets': self.assets[:1]})
@@ -319,11 +321,12 @@ class WorkerTests(unittest.TestCase):
             self.assertEqual(worker.status()['dimension'], DIMENSION)
             for query in ('pies na trawie', 'dog on the grass'):
                 self.assertEqual(worker.request({'op': 'query', 'text': query})['results'][0]['id'], 'a')
-            load.assert_called_once_with(args.models)
+            load.assert_called_once_with(args.models, 'cuda')
             encoder.images.assert_called_once_with([image])
             self.assertEqual(encoder.texts.call_args_list, [call(['pies na trawie']), call(['dog on the grass'])])
         args.index = self.args.index
-        with self.assertRaisesRegex(ValueError, 'another index'):
+        with patch('photo_search.wemm.card', return_value=fits), patch('photo_search.engines.log'), \
+                self.assertRaisesRegex(ValueError, 'another index'):
             Worker(args)
 
     def test_warm_loads_the_text_model_only_with_something_to_find(self):

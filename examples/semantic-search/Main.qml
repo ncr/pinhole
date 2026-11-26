@@ -22,6 +22,10 @@ PinholePlugin {
                 text: backgroundIndex.summary
             }
             SettingNote {
+                visible: text !== ""
+                text: backgroundIndex.deviceNote
+            }
+            SettingNote {
                 dim: true
                 visible: text !== ""
                 text: backgroundIndex.profile?.name || ""

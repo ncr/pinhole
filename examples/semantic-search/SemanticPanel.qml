@@ -86,13 +86,15 @@ Panel {
         closeTags(true)
         return true
     }
+    // A question that failed, in a line; what went wrong to the log.
     function report(error) {
         if (error.code === "cancelled") return
-        localFailure = error.message || String(error)
+        let message = error.message || String(error)
         if (error.stdout) {
-            try { localFailure = JSON.parse(error.stdout).error || localFailure } catch (_) {}
+            try { message = JSON.parse(error.stdout).error || message } catch (_) {}
         }
-        pinhole.warn(error)
+        console.warn("Photo content search: a question failed:", message)
+        localFailure = qsTr("This search did not work. Pinhole's log has the details.")
     }
     function request(message) { return indexer.request(message) }
     function ask(text) {
@@ -327,8 +329,10 @@ Panel {
             color: panel.failure !== "" ? theme.red : theme.darkForeground
             text: panel.failure !== "" ? panel.failure
                 : panel.tagQuery ? (panel.tagName ? qsTr("Photos tagged #%1").arg(panel.tagName) : qsTr("Every tagged photo"))
-                : !panel.indexer.complete ? panel.indexer.summary
-                : ""
+                // How far indexing is, and where search runs when not on
+                // the card: said before anything is asked.
+                : [panel.indexer.complete ? "" : panel.indexer.summary, panel.indexer.deviceNote]
+                    .filter(Boolean).join("\n")
         }
     }
     PhotoTiles {

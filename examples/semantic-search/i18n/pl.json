@@ -49,5 +49,12 @@
   "mountains": "góry",
   "old car": "stary samochód",
   "Indexing while you are away from the screen, so the desktop stays smooth: %1 of %2 photos can be found.": "Indeksuję, gdy nie ma Cię przy ekranie, żeby pulpit się nie zacinał: można znaleźć %1 z %2 zdjęć.",
-  "Search waits while background work is paused in Settings.": "Wyszukiwanie czeka, bo praca w tle jest wstrzymana w Ustawieniach."
+  "Search waits while background work is paused in Settings.": "Wyszukiwanie czeka, bo praca w tle jest wstrzymana w Ustawieniach.",
+  "Waiting for free memory: %1 of %2 photos can be found.": "Czekam na wolną pamięć: można znaleźć %1 z %2 zdjęć.",
+  "This search did not work. Pinhole's log has the details.": "To wyszukiwanie się nie udało. Szczegóły są w logu Pinhole.",
+  "No NVIDIA graphics card works here, so search runs on the processor, more slowly.": "Nie działa tu żadna karta graficzna NVIDIA, więc wyszukiwanie działa na procesorze, wolniej.",
+  "This graphics card is too old for the search model, so search runs on the processor, more slowly.": "Ta karta graficzna jest za stara dla modelu wyszukiwania, więc wyszukiwanie działa na procesorze, wolniej.",
+  "This graphics card has too little memory for the search model, so search runs on the processor, more slowly.": "Ta karta graficzna ma za mało pamięci dla modelu wyszukiwania, więc wyszukiwanie działa na procesorze, wolniej.",
+  "Other programs are using the graphics card, so search runs on the processor for now.": "Kartę graficzną zajmują inne programy, więc wyszukiwanie działa na razie na procesorze.",
+  "Something went wrong in photo search. Pinhole's log has the details.": "Coś poszło nie tak w wyszukiwaniu zdjęć. Szczegóły są w logu Pinhole."
 }

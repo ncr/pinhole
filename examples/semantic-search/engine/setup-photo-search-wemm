@@ -1,5 +1,5 @@
 #!/bin/sh
-# Prepare the optional CUDA environment. The plugin never downloads at runtime.
+# Prepare the optional WeMM environment, for an NVIDIA card or the processor. The plugin never downloads at runtime.
 set -eu
 umask 077
 # From the checkout, whose .tools/photo-search it fills.
@@ -44,12 +44,13 @@ from pathlib import Path
 import shutil
 import sys
 
-import torch
+from photo_search.wemm import FILES, NO_CARD, REPO, REVISION, card, verify_snapshot
 
-from photo_search.wemm import FILES, REPO, REVISION, verify_snapshot
-
-if not torch.cuda.is_available() or not torch.cuda.is_bf16_supported(including_emulation=False):
-    raise SystemExit("WeMM requires a CUDA GPU with native BF16 support")
+# Without a suitable NVIDIA card WeMM runs on the processor: a question in
+# a quarter of a second, a photo indexed in about two.
+found = card()
+if found.reason in NO_CARD:
+    print(f"No NVIDIA card WeMM can use here ({found.detail}): search and indexing will run on the processor.")
 
 target = Path(sys.argv[1])
 if sys.argv[2]:

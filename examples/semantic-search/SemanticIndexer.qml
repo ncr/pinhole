@@ -33,8 +33,21 @@ Item {
         : complete ? qsTr("All %1 photos can be found.").arg(count(status.total))
         : paused ? qsTr("Indexing is paused: %1 of %2 photos can be found.").arg(count(status.indexed)).arg(count(status.total))
         : status.yielding ? qsTr("Indexing while you are away from the screen, so the desktop stays smooth: %1 of %2 photos can be found.").arg(count(status.indexed)).arg(count(status.total))
+        : status.waiting && noCard ? qsTr("Waiting for free memory: %1 of %2 photos can be found.").arg(count(status.indexed)).arg(count(status.total))
         : status.waiting ? qsTr("Waiting for the graphics card: %1 of %2 photos can be found.").arg(count(status.indexed)).arg(count(status.total))
         : qsTr("Looking through your photos: %1 of %2 can be found so far.").arg(count(status.indexed)).arg(count(status.total))
+
+    // WeMM's worker says where a question is answered (search_on) and,
+    // when not on the card, why (card): no suitable one here for good, or
+    // one that other programs fill now.
+    readonly property bool noCard: ["driver", "bf16", "small"].includes(status.card)
+    readonly property string deviceNote: status.card === "driver"
+            ? qsTr("No NVIDIA graphics card works here, so search runs on the processor, more slowly.")
+        : status.card === "bf16" ? qsTr("This graphics card is too old for the search model, so search runs on the processor, more slowly.")
+        : status.card === "small" ? qsTr("This graphics card has too little memory for the search model, so search runs on the processor, more slowly.")
+        : status.card === "busy" && status.search_on === "processor"
+            ? qsTr("Other programs are using the graphics card, so search runs on the processor for now.")
+        : ""
 
     function cancel(job) { if (job) job.cancel() }
     function reset() {
@@ -47,10 +60,16 @@ Item {
         ready = false; catalogReady = false; failure = ""; indexPath = ""
         status = { indexed: 0, total: 0, running: false, waiting: false, errors: 0 }
     }
+    // What went wrong, in a line: the error itself goes to the log, once.
+    property string logged: ""
     function friendly(message) {
+        if (message !== logged) {
+            logged = message
+            console.warn("Photo content search:", message)
+        }
         return message.includes("reboot")
             ? qsTr("The NPU stopped responding. Restart the computer and repeat its smoke test before indexing again. Existing results still work.")
-            : message
+            : qsTr("Something went wrong in photo search. Pinhole's log has the details.")
     }
     function report(error) {
         if (error.code === "cancelled" || error.code === "reloaded") return
@@ -59,10 +78,12 @@ Item {
         if (error.stdout) {
             try { message = JSON.parse(error.stdout).error || message } catch (_) {}
         }
-        if (error.stderr?.includes("No local photo-search engine"))
-            message = qsTr("Set up a local photo search engine for this computer.")
-        failure = friendly(message)
-        pinhole.warn(error)
+        if (error.stderr?.includes("No local photo-search engine")) {
+            console.warn("Photo content search:", error.stderr)
+            failure = qsTr("Set up a local photo search engine for this computer.")
+        } else {
+            failure = friendly(message + (error.stderr ? "\n" + error.stderr : ""))
+        }
     }
     function ensureStarted() {
         if (sourceKey !== pinhole.library.key) {
