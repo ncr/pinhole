@@ -25,7 +25,7 @@ no people in them.
 <img src="coming.svg" alt="A clip of this plugin is still to be recorded" width="100%">
 
 <img src="people.svg" alt="People, ⇧ F: Faces grouped by person. Name them once, and your other computers know them too." width="100%">
-<img src="coming.svg" alt="A clip of this plugin is still to be recorded" width="100%">
+<img src="people.webp" alt="People at work in Pinhole" width="100%">
 
 <img src="live-photos.svg" alt="Live Photos, L: A Live Photo moves, and plays as a loop, a bounce or a long exposure." width="100%">
 <img src="live-photos.webp" alt="Live Photos at work in Pinhole" width="100%">
