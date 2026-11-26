@@ -31,8 +31,13 @@ public:
 
     void reload();
     // Where what was done to the photos is kept: followed into each read,
-    // and a change there reads the library again (adjustment.h).
+    // and a change there (or an edit on its way to the source) drawn at
+    // once on the library shown, without reading it again (adjustment.h).
     void setAdjustments(class AdjustmentStore *store);
+    // The library shown drawn with what the store has now: `readjusted`
+    // where any photo's adjustment changed. Put off to the swap while one
+    // is read.
+    void readjust();
     // The next reload is another source's library: shown from its newest
     // photos, not from where the last one was (see `reloaded`).
     void showNewestNext() { m_toNewest = true; }
@@ -57,6 +62,9 @@ signals:
     // the swap with everything that follows it here (the window stood
     // still for that long).
     void swapped(qint64 readMs, qint64 swapMs);
+    // Photos turned or cut in place (readjust): the same positions, `textures`
+    // -1 where one's drawn picture must go. aboutToSwap comes first.
+    void readjusted(const std::vector<int> &moved, const std::vector<int> &textures);
 
 private:
     struct Read;

@@ -91,6 +91,10 @@ public:
     // position (queued, decoded, failed, medium files): the positions mean
     // other photos now. GUI thread.
     void reload(const std::function<void()> &swap);
+    // Run `change` with every decoder idle, then forget only what was
+    // decoded of the photos it names (their adjustments changed): the
+    // positions keep their meaning. GUI thread.
+    void readjust(const std::function<std::vector<int>()> &change);
 
     int threads() const { return int(m_threads.size()); }
     quint64 decodedCount() const { return m_decoded.load(); }

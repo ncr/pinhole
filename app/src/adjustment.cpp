@@ -110,6 +110,19 @@ Adjustment Adjustment::turned(int quarters) const {
     return a.normalized();
 }
 
+bool Adjustment::near(const Adjustment &other) const {
+    constexpr double hair = 1e-4;
+    return turn == other.turn && std::abs(crop.x() - other.crop.x()) < hair && std::abs(crop.y() - other.crop.y()) < hair
+        && std::abs(crop.width() - other.crop.width()) < hair && std::abs(crop.height() - other.crop.height()) < hair;
+}
+
+int Adjustment::quartersBetween(const Adjustment &from, const Adjustment &to) {
+    for (int q = 0; q < 4; ++q)
+        if (from.turned(q).near(to))
+            return q;
+    return -1;
+}
+
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -163,9 +176,11 @@ void AdjustmentStore::setLibrary(const QString &dir) {
     bool had = false;
     {
         std::lock_guard lock(m_mutex);
-        had = !m_all.isEmpty();
+        had = !m_all.isEmpty() || !m_pending.isEmpty();
         m_all.clear();
+        m_pending.clear();
     }
+    ++m_version;
     if (had)
         emit changed();
     read();
@@ -214,6 +229,7 @@ void AdjustmentStore::read() {
             return;
         m_all = all;
     }
+    ++m_version;
     emit changed();
 }
 
@@ -261,6 +277,54 @@ bool AdjustmentStore::set(const Adjustments &changes) {
             return true;
         m_all = all;
     }
+    ++m_version;
     emit changed();
     return true;
+}
+
+Adjustments AdjustmentStore::pending() const {
+    std::lock_guard lock(m_mutex);
+    return m_pending;
+}
+
+bool AdjustmentStore::pendingOf(const QByteArray &id, Adjustment *target) const {
+    std::lock_guard lock(m_mutex);
+    const auto it = m_pending.constFind(id);
+    if (it == m_pending.cend())
+        return false;
+    if (target)
+        *target = it.value();
+    return true;
+}
+
+void AdjustmentStore::setPending(const Adjustments &targets) {
+    bool same = true;
+    {
+        std::lock_guard lock(m_mutex);
+        for (auto it = targets.begin(); it != targets.end(); ++it) {
+            const Adjustment a = it.value().normalized();
+            const auto was = m_pending.constFind(it.key());
+            if (was != m_pending.cend() && *was == a)
+                continue;
+            m_pending.insert(it.key(), a);
+            same = false;
+        }
+    }
+    if (same)
+        return;
+    ++m_version;
+    emit changed();
+}
+
+void AdjustmentStore::forgetPending(const QList<QByteArray> &ids) {
+    bool had = false;
+    {
+        std::lock_guard lock(m_mutex);
+        for (const QByteArray &id : ids)
+            had = m_pending.remove(id) > 0 || had;
+    }
+    if (!had)
+        return;
+    ++m_version;
+    emit changed();
 }

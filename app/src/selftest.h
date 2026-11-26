@@ -336,6 +336,9 @@ void runFrameSelfTest(QQuickWindow *window, const Library &library);
 // PINHOLE_SELFTEST=edit:<dir>: Turn and crop: a photo turned (its shape
 // follows), cropped and kept; pictures in <dir> (selftestedit.cpp).
 void runEditSelfTest(QQuickWindow *window, const Library &library, Viewer &viewer, const QString &dir);
+// PINHOLE_SELFTEST=turn:<dir> (selftestedit.cpp): R and ⇧ R on PINHOLE_SELFTEST_PHOTO
+// in a library whose source keeps edits, as the person presses them.
+void runTurnSelfTest(QQuickWindow *window, const Library &library, Viewer &viewer, const QString &dir);
 // PINHOLE_SELFTEST=people:<dir>: who is in the photo shown (People's W):
 // its button, the card naming two faces, a name taken back, the faces where
 // the photo turned has them; pictures in <dir> (selftestpeople.cpp).

@@ -55,6 +55,7 @@ SOURCES += $$GENERATED/pointer-gestures-unstable-v1-protocol.c \
 HEADERS += \
     $$PWD/library.h \
     $$PWD/adjustment.h \
+    $$PWD/sourceedits.h \
     $$PWD/timeline.h \
     $$PWD/libraryreloader.h \
     $$PWD/keymap.h \
@@ -108,6 +109,7 @@ HEADERS += \
 SOURCES += \
     $$PWD/library.cpp \
     $$PWD/adjustment.cpp \
+    $$PWD/sourceedits.cpp \
     $$PWD/pluginguide.cpp \
     $$PWD/timeline.cpp \
     $$PWD/libraryreloader.cpp \

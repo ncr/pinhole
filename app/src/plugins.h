@@ -443,11 +443,13 @@ public:
     // Photos (positions or ids, or one) given this `turn` and/or `crop`;
     // { turn: 0, crop: null } takes it all back. False when there is no
     // library, or it could not be kept.
-    // A promise of { photos: [{ id, turn, crop }], kept }: kept "source"
-    // where the source keeps edits (iCloud: written there as its devices
-    // write theirs, which they show and can revert), "here" where it keeps
-    // none (a folder: Pinhole keeps it). Rejected "unavailable" when the
-    // source could not take it.
+    // A promise of { photos: [{ id, turn, crop }], kept }, settled as soon
+    // as it shows: kept "source" where the source keeps edits (iCloud:
+    // written there as its devices write theirs, which they show and can
+    // revert, once the photo is left alone a few seconds: SourceEdits),
+    // "here" where it keeps none (a folder: Pinhole keeps it). Rejected
+    // "unavailable" when it could not be kept here; one the source refuses
+    // later is said as a notice of the plugin's.
     Q_INVOKABLE QJSValue adjust(const QJSValue &photos, const QVariantMap &adjustment);
     // Turned `quarters` more clockwise (-1: a quarter back), each from
     // where it is, its crop turning with it.
@@ -814,6 +816,9 @@ public:
     // The library was read again, or moved: `moved` has each old
     // position's new one, -1 for a photo gone.
     void libraryReloaded(const std::vector<int> &moved);
+    // Photos turned or cut in place (LibraryReloader::readjusted): the
+    // same positions, pinhole.library's revision another.
+    void libraryReadjusted();
     // The name of the source's library among plugins' cacheDirs:
     // icloud-<apple id>, folder-<path>.
     QString cacheName() const;
@@ -891,8 +896,11 @@ public:
     PluginViewer *viewerApi() const { return m_viewerApi.get(); }
     // pinholed's workers, as its `workers` event last said: every plugin's.
     // Where what the person did to the photos is kept (adjustment.h).
-    void setAdjustments(class AdjustmentStore *store) { m_adjustmentStore = store; }
+    // With it, edits sent to a source that keeps them (iCloud), each drawn
+    // at once and sent once its photo is left alone (sourceedits.h).
+    void setAdjustments(class AdjustmentStore *store);
     class AdjustmentStore *adjustments() const { return m_adjustmentStore; }
+    class SourceEdits *sourceEdits() const { return m_sourceEdits.get(); }
     const QJsonArray &serviceWorkers() const { return m_workers; }
     ServiceClient *service() const { return m_service; }
     Viewer *viewerObject() const { return m_viewer; }
@@ -994,6 +1002,8 @@ private:
     std::unique_ptr<PluginViewer> m_viewerApi;
     QJsonArray m_workers;
     class AdjustmentStore *m_adjustmentStore = nullptr;
+    // Before the plugins, whose hosts hand it edits.
+    std::unique_ptr<class SourceEdits> m_sourceEdits;
     // Before the plugins, so it outlives their hosts, which let it go.
     KeepAwake m_keepAwake;
     ColourDisplay m_display;

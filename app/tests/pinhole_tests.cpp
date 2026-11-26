@@ -69,6 +69,7 @@
 #include "pluginguide.h"
 #include "framestats.h"
 #include "plugins.h"
+#include "sourceedits.h"
 #include "synced.h"
 #include "propertymap.h"
 #include "panzoom.h"
@@ -5965,45 +5966,127 @@ private slots:
         QVERIFY(store.snapshot().isEmpty());
     }
 
-    // Several turned in iCloud, one failing after another is in: the
-    // error says which were done, so they can be undone.
-    void anEditThatFailsPartWaySaysWhichPhotosWereDone() {
-        PluginBench bench({{"t", {{"api", Plugins::api}}}}, {{"a", 1000}, {"b", 2000}}, true);
+    // Turned in iCloud: shown at once, and sent only once the photo is left
+    // alone, as one edit however many times it was turned; each over the
+    // edit last written, though the library has not been read again since
+    // (pinholed refused the second turn as "edited elsewhere" when the
+    // window sent the edit it had read). One the source refuses is said,
+    // and the photo is as the source has it again.
+    void turnsInICloudShowAtOnceAndGoAsOneEditOnceLeftAlone() {
+        PluginBench bench({{"t", {{"api", Plugins::api}}}}, {{"a", 1000}, {"b", 2000}, {"c", 3000}}, true);
         AdjustmentStore store;
         store.setLibrary(bench.dir.path());
         bench.plugins->setAdjustments(&store);
+        SourceEdits *edits = bench.plugins->sourceEdits();
+        QVERIFY(edits);
+        edits->setQuiet(300);
         QTemporaryDir other;
-        makeLibrary(other.path(), {{"a", 1000}, {"b", 2000}}, false, "icloud:x");
+        makeLibrary(other.path(), {{"a", 1000}, {"b", 2000}, {"c", 3000}}, false, "icloud:x");
         Library cloud;
         QString error;
         QVERIFY(cloud.open(other.path(), &error));
         bench.library.swap(cloud);
-        QByteArray first;
-        // Each edit says what it was made from: these, shown unedited.
-        bool based = true;
+        QList<QJsonObject> edited;
         QObject::connect(bench.fake.peer, &QLocalSocket::readyRead, bench.fake.peer, [&] {
             const qsizetype seen = bench.fake.asked.size();
             bench.fake.read();
             for (qsizetype i = seen; i < bench.fake.asked.size(); ++i) {
                 const QJsonObject line = bench.fake.asked[i];
-                const QByteArray asset = line.value("params").toObject().value("asset").toString().toUtf8();
-                if (line.value("method").toString() == "fetch" && (first.isEmpty() || first == asset)) {
-                    first = asset;
+                const QJsonObject params = line.value("params").toObject();
+                if (line.value("method").toString() == "fetch") {
                     bench.fake.send({{"id", line.value("id")}, {"ok", true}, {"result", QJsonObject{{"path", "/x"}, {"type", "public.jpeg"}}}});
-                } else if (line.value("method").toString() == "set_edit") {
-                    const QJsonObject params = line.value("params").toObject();
-                    based = based && params.contains("base") && params.value("base").isNull();
+                } else if (line.value("method").toString() == "set_edit" && params.value("asset").toString() != "c") {
+                    edited.append(params);
                     bench.fake.send({{"id", line.value("id")}, {"ok", true}, {"result", QJsonObject{}}});
                 } else {
-                    bench.fake.send({{"id", line.value("id")}, {"ok", false}, {"error", QJsonObject{{"code", "unavailable"}, {"message", "offline"}}}});
+                    bench.fake.send({{"id", line.value("id")}, {"ok", false},
+                                     {"error", QJsonObject{{"code", "conflict"}, {"message", "edited elsewhere"}}}});
                 }
             }
         });
-        bench.js(R"(pinhole.turn(['a', 'b'], 1).then(() => said.push("done"),
-                    e => said.push(e.code + " " + e.kept + " " + e.photos.map(p => p.id + p.turn).join())))");
-        QTRY_COMPARE(bench.said().size(), 1);
-        QCOMPARE(bench.said().first(), QString("unavailable source " + QString::fromUtf8(first) + "1"));
-        QVERIFY(based);
+        // R three times: each shown at once, nothing sent yet.
+        for (int i = 0; i < 3; ++i)
+            bench.js("pinhole.turn(['a'], 1).then(r => said.push(r.kept + r.photos[0].turn))");
+        QTRY_COMPARE(bench.said().size(), 3);
+        QCOMPARE(bench.said(), QStringList({"source1", "source2", "source3"}));
+        QCOMPARE(bench.js("pinhole.adjustment('a').turn").toInt(), 3);
+        QCOMPARE(bench.js("pinhole.adjustment('a').kept").toString(), QString("source"));
+        QCOMPARE(store.pending().value("a").turn, 3);
+        // Drawn so: a turn over its files, which are of no edit yet.
+        bench.library.applyAdjustments(store.snapshot(), store.pending());
+        QCOMPARE(bench.library.at(0).adjust.turn, 3);
+        QVERIFY(edits->busy());
+        QTest::qWait(150);
+        QVERIFY(edited.isEmpty());
+        // Left alone: one edit, of three quarters, over none.
+        QTRY_COMPARE(edited.size(), 1);
+        QCOMPARE(edited[0].value("asset").toString(), QString("a"));
+        QCOMPARE(edited[0].value("turn").toInt(), 3);
+        QVERIFY(edited[0].value("base").isNull());
+        QTRY_VERIFY(!edits->busy());
+
+        // Turned once more before the library is read again: over the edit
+        // written, not the one the library still says; back to none.
+        bench.js("pinhole.turn(['a'], 1)");
+        QCOMPARE(bench.js("pinhole.adjustment('a').turn").toInt(), 0);
+        QTRY_COMPARE(edited.size(), 2);
+        QCOMPARE(edited[1].value("base").toObject().value("turn").toInt(), 3);
+        QVERIFY(!edited[1].contains("turn"));
+        QTRY_VERIFY(!edits->busy());
+
+        // R then ⇧ R: nothing to send, nothing kept on its way.
+        bench.js("pinhole.turn(['b'], 1); pinhole.turn(['b'], -1)");
+        QTest::qWait(600);
+        QCOMPARE(edited.size(), 2);
+        QVERIFY(!store.pendingOf("b", nullptr));
+
+        // The library read again has a's edit as written (none): done with.
+        bench.plugins->libraryReloaded({0, 1, 2});
+        QVERIFY(store.pending().isEmpty());
+        QVERIFY(!edits->target("a"));
+
+        // Refused: said, and shown as the source has it again.
+        QSignalSpy notice(bench.plugins.get(), &Plugins::notice);
+        bench.js("pinhole.turn(['c'], 1)");
+        QCOMPARE(store.pending().value("c").turn, 1);
+        QTRY_COMPARE(notice.size(), 1);
+        QCOMPARE(notice.first().value(0).toString(), QString("t"));
+        QVERIFY(notice.first().value(1).toString().contains("edited elsewhere"));
+        QVERIFY(!store.pendingOf("c", nullptr));
+        QCOMPARE(bench.js("pinhole.adjustment('c').turn").toInt(), 0);
+    }
+
+    // The window draws what is turned at once, without reading the
+    // library again: only the photos turned have their pictures dropped.
+    void aTurnIsDrawnInPlaceWithoutReadingTheLibraryAgain() {
+        QTemporaryDir dir;
+        makeLibrary(dir.path(), {{"a", 1000}, {"b", 2000}}, false, "icloud:x");
+        Library library;
+        QString error;
+        QVERIFY(library.open(dir.path(), &error));
+        ThumbnailLoader loader(&library, 1);
+        LibraryReloader reloader(&library, &loader, dir.path());
+        int reloads = 0;
+        QObject::connect(&reloader, &LibraryReloader::reloaded, &reloader, [&] { ++reloads; });
+        reloader.reload();
+        QTRY_COMPARE(reloads, 1);
+        AdjustmentStore store;
+        reloader.setAdjustments(&store);
+        std::vector<std::vector<int>> readjusted;
+        QObject::connect(&reloader, &LibraryReloader::readjusted, &reloader,
+                         [&](const std::vector<int> &, const std::vector<int> &textures) { readjusted.push_back(textures); });
+        Adjustment turned;
+        turned.turn = 1;
+        store.setPending({{"b", turned}});
+        QCOMPARE(readjusted.size(), size_t(1));
+        QCOMPARE(library.at(1).adjust.turn, 1);
+        QCOMPARE(library.at(0).adjust.turn, 0);
+        QCOMPARE(readjusted[0], std::vector<int>({0, -1}));
+        store.forgetPending({"b"});
+        QCOMPARE(readjusted.size(), size_t(2));
+        QTest::qWait(100);
+        QCOMPARE(reloads, 1);
+        QCOMPARE(library.at(1).adjust, Adjustment());
     }
 
     void theKitsViewJobAndSettingsSaveAPluginItsBoilerplate() {

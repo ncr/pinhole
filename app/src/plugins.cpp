@@ -14,6 +14,7 @@
 #include "photoprovider.h"
 #include "scroller.h"
 #include "serviceclient.h"
+#include "sourceedits.h"
 #include "sources.h"
 #include "storage.h"
 #include "translator.h"
@@ -1103,7 +1104,22 @@ void Plugins::libraryOpened() {
     emit allLoaded();
 }
 
+void Plugins::setAdjustments(AdjustmentStore *store) {
+    m_adjustmentStore = store;
+    m_sourceEdits.reset();
+    if (!store || !m_service)
+        return;
+    m_sourceEdits = std::make_unique<SourceEdits>(m_library, m_service, store);
+    connect(m_sourceEdits.get(), &SourceEdits::failed, this, [this](const QString &by, const QString &message) {
+        emit notice(by, tr("Could not save the edit: %1").arg(message));
+    });
+}
+
+void Plugins::libraryReadjusted() { m_libraryApi->touched(); }
+
 void Plugins::libraryReloaded(const std::vector<int> &moved) {
+    if (m_sourceEdits)
+        m_sourceEdits->libraryReloaded();
     // pinhole.synced is the library's before pinhole.library says it is
     // another: what a plugin sets as it hears of it lands in that one.
     m_syncedStore->setLibrary(m_library->dir());

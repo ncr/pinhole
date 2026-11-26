@@ -46,12 +46,18 @@ struct Adjustment {
     // Turned `quarters` more clockwise (negative: the other way), the part
     // kept turning with the picture.
     Adjustment turned(int quarters) const;
+    // The same within a hair (crops read back from text, turned by sums).
+    bool near(const Adjustment &other) const;
+    // How many quarters clockwise `from` turns to be `to` (0 to 3), or -1
+    // where `to` is no turn of it (cut otherwise).
+    static int quartersBetween(const Adjustment &from, const Adjustment &to);
 };
 
 using Adjustments = QHash<QByteArray, Adjustment>;
 
 #include <QFileSystemWatcher>
 #include <QObject>
+#include <atomic>
 #include <mutex>
 
 // What has been done to the photos of the library shown, kept apart from
@@ -73,8 +79,20 @@ public:
     // A library's, read now from its file. Any thread.
     static Adjustments load(const QString &libraryDir);
 
+    // Edits on their way to the source (SourceEdits): each photo's whole
+    // edit as it will be there, drawn at once over its files, which are of
+    // the edit the source has (LibraryItem::sourceEdit). Never written to
+    // the file; another library's are none. Any thread.
+    Adjustments pending() const;
+    bool pendingOf(const QByteArray &id, Adjustment *target) const;
+    void setPending(const Adjustments &targets);
+    void forgetPending(const QList<QByteArray> &ids);
+    // Counts changes of either kind: a library read meanwhile is drawn
+    // with them all once it is in. Any thread.
+    quint64 version() const { return m_version.load(); }
+
 signals:
-    // They changed, here or in another window.
+    // They changed, here or in another window, or on their way.
     void changed();
 
 private:
@@ -82,6 +100,8 @@ private:
 
     mutable std::mutex m_mutex;
     Adjustments m_all;
+    Adjustments m_pending;
+    std::atomic<quint64> m_version{0};
     QString m_file;
     QFileSystemWatcher m_watcher;
 };

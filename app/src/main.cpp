@@ -24,6 +24,7 @@
 #include "framemonitor.h"
 #include "keymap.h"
 #include "library.h"
+#include "sourceedits.h"
 #include "timeline.h"
 #include "libraryreloader.h"
 #include "adjustment.h"
@@ -437,6 +438,14 @@ int main(int argc, char *argv[]) {
         plugins.libraryReloaded(moved);
         favourites.reloaded();
     });
+    // Turned or cut in place: the same photos where they were, only those
+    // drawn again.
+    QObject::connect(&reloader, &LibraryReloader::readjusted, grid,
+                     [&, grid](const std::vector<int> &moved, const std::vector<int> &textures) {
+        grid->libraryReloaded(moved, &textures);
+        viewer.libraryReloaded(moved);
+        plugins.libraryReadjusted();
+    });
     // Undone on another source's photos of the same ids, a step would
     // change photos it was never done to.
     QObject::connect(&reloader, &LibraryReloader::otherSource, &history, &History::clear);
@@ -491,5 +500,18 @@ int main(int argc, char *argv[]) {
         QTimer::singleShot(1500, &bench, &Bench::start);
     }
 
-    return app.exec();
+    const int code = app.exec();
+    // Turns not yet sent to the source (left alone for less than a few
+    // seconds): sent now, the window gone meanwhile, for half a minute at
+    // most.
+    if (SourceEdits *edits = plugins.sourceEdits(); edits && edits->busy()) {
+        window->hide();
+        QEventLoop sending;
+        QTimer::singleShot(30000, &sending, &QEventLoop::quit);
+        QObject::connect(edits, &SourceEdits::idle, &sending, &QEventLoop::quit);
+        edits->flush();
+        if (edits->busy())
+            sending.exec();
+    }
+    return code;
 }

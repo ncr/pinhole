@@ -26,40 +26,19 @@ PinholePlugin {
     function idsOf(photos) {
         return photos.map(photo => pinhole.library.item(photo).id).filter(id => id !== undefined)
     }
-    // Saving in iCloud, which takes a second or two: said if it takes
-    // longer than a moment.
-    property bool saving: false
-    property bool said: false
-    Timer {
-        id: slow
-        interval: 700
-        onTriggered: if (plugin.saving) { plugin.said = true; pinhole.notify(qsTr("Saving the edit in iCloud…")) }
-    }
     // Each as it is now, to undo to; then done (in iCloud, where the photo
-    // is iCloud's, else kept here), and a step that puts them back, or does
-    // it again, in the library it was done in.
+    // is iCloud's: shown at once, sent once it is left alone a moment, so
+    // turning it again and again is one edit there; else kept here), and a
+    // step that puts them back, or does it again, in the library it was
+    // done in. An edit iCloud would not take is said by Pinhole itself.
     function step(words, ids, apply) {
         const before = {}
         ids.forEach(id => before[id] = pinhole.adjustment(id))
         const key = pinhole.library.key
-        // Those done, even when one after them failed: each undoes.
-        const record = after => pinhole.did(words,
-            () => { if (pinhole.library.key === key) after.forEach(a => pinhole.adjust(a.id, before[a.id]).catch(pinhole.warn)) },
-            () => { if (pinhole.library.key === key) after.forEach(a => pinhole.adjust(a.id, a).catch(pinhole.warn)) })
-        saving = true
-        said = false
-        slow.restart()
-        apply().then(done => {
-            saving = false
-            record(done.photos)
-            if (said && done.kept === "source")
-                pinhole.notify(qsTr("Saved in iCloud"))
-        }).catch(error => {
-            saving = false
-            if (error.photos && error.photos.length > 0)
-                record(error.photos)
-            pinhole.notify(qsTr("Could not save the edit: %1").arg(error.message))
-        })
+        apply().then(done => pinhole.did(words,
+            () => { if (pinhole.library.key === key) done.photos.forEach(a => pinhole.adjust(a.id, before[a.id]).catch(pinhole.warn)) },
+            () => { if (pinhole.library.key === key) done.photos.forEach(a => pinhole.adjust(a.id, a).catch(pinhole.warn)) })
+        ).catch(error => pinhole.notify(qsTr("Could not save the edit: %1").arg(error.message)))
     }
     function turn(photos, quarters) {
         const ids = idsOf(photos)

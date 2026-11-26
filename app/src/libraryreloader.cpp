@@ -33,6 +33,8 @@ struct LibraryReloader::Read {
     // No library.sqlite there: read as an empty one.
     bool missing = false;
     qint64 readMs = 0;
+    // The store's changes it was drawn with (AdjustmentStore::version).
+    quint64 adjustments = 0;
 };
 
 LibraryReloader::LibraryReloader(Library *library, ThumbnailLoader *loader, const QString &dir, QObject *parent)
@@ -94,7 +96,8 @@ void LibraryReloader::reload() {
             }, Qt::QueuedConnection);
             return;
         }
-        read->fresh.applyAdjustments(AdjustmentStore::load(dir));
+        read->adjustments = m_adjustments ? m_adjustments->version() : 0;
+        read->fresh.applyAdjustments(AdjustmentStore::load(dir), m_adjustments ? m_adjustments->pending() : Adjustments());
         const Library &fresh = read->fresh;
         QHash<QByteArray, int> positions;
         positions.reserve(fresh.count());
@@ -147,8 +150,32 @@ void LibraryReloader::swapIn(const std::shared_ptr<Read> &read) {
                  m_library->count(), before, read->readMs, swapping.elapsed());
     emit swapped(read->readMs, swapping.elapsed());
     m_reading = false;
+    // Turned or cut while it was read: drawn so now.
+    if (m_adjustments && m_adjustments->version() != read->adjustments)
+        readjust();
     if (std::exchange(m_again, false))
         reload();
+}
+
+void LibraryReloader::readjust() {
+    // The read in flight is drawn with them once swapped in (swapIn).
+    if (!m_adjustments || m_reading)
+        return;
+    const Adjustments kept = m_adjustments->snapshot(), pending = m_adjustments->pending();
+    std::vector<int> changed;
+    // The library's sizes and adjustments are read by the decoders: changed
+    // only while they are idle, and only these photos' pictures dropped.
+    emit aboutToSwap();
+    m_loader->readjust([&] { changed = m_library->applyAdjustments(kept, pending); return changed; });
+    if (changed.empty())
+        return;
+    std::vector<int> moved(size_t(m_library->count()));
+    for (size_t i = 0; i < moved.size(); ++i)
+        moved[i] = int(i);
+    std::vector<int> textures = moved;
+    for (const int i : changed)
+        textures[size_t(i)] = -1;
+    emit readjusted(moved, textures);
 }
 
 void LibraryReloader::setAdjustments(AdjustmentStore *store) {
@@ -156,6 +183,6 @@ void LibraryReloader::setAdjustments(AdjustmentStore *store) {
     if (!store)
         return;
     store->setLibrary(m_dir);
-    connect(store, &AdjustmentStore::changed, this, &LibraryReloader::reload);
+    connect(store, &AdjustmentStore::changed, this, &LibraryReloader::readjust);
     connect(this, &LibraryReloader::reloaded, store, [this] { m_adjustments->setLibrary(m_dir); });
 }

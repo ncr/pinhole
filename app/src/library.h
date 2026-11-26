@@ -52,8 +52,12 @@ public:
     // (favourites.h).
     void setFavorite(int i, bool favorite) { m_items[size_t(i)].favorite = favorite; }
     // What the person did to its photos (adjustment.h): each one's
-    // adjustment, and its size drawn so. Those not named, none.
-    void applyAdjustments(const Adjustments &all);
+    // adjustment, and its size drawn so. Those not named, none. `pending`,
+    // edits on their way to the source (AdjustmentStore::pending): drawn
+    // as the turn from what its files show (sourceEdit) to it, where it is
+    // one, else as its files are until the source has it. The positions
+    // whose adjustment changed.
+    std::vector<int> applyAdjustments(const Adjustments &all, const Adjustments &pending = {});
     // Take another library's items (a fresh read of the same index). Only
     // while nothing else reads this one: see ThumbnailLoader::reload.
     void swap(Library &other) {

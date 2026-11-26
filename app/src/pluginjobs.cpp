@@ -1,4 +1,5 @@
 #include "plugins.h"
+#include "sourceedits.h"
 #include "adjustment.h"
 #include "encoder.h"
 #include "favourites.h"
@@ -798,7 +799,11 @@ QVariantMap mapOf(const Adjustment &a) {
 } // namespace
 
 Adjustment PluginHost::currentAdjustment(const QByteArray &id) const {
-    // Kept here (a folder's, or one being saved), else its source's.
+    // On its way to the source, as it will be there; kept here (a
+    // folder's); else its source's.
+    if (SourceEdits *edits = m_plugins->sourceEdits())
+        if (const auto target = edits->target(id))
+            return *target;
     if (AdjustmentStore *store = m_plugins->adjustments(); store && !store->of(id).isIdentity())
         return store->of(id);
     const Library *data = m_plugins->libraryData();
@@ -815,7 +820,8 @@ QVariantMap PluginHost::adjustment(const QJSValue &photo) const {
     // Where it is kept: "source" (its renditions are of it already), "here"
     // or "" for none.
     AdjustmentStore *store = m_plugins->adjustments();
-    const bool here = store && !store->of(ids.first()).isIdentity();
+    const bool going = m_plugins->sourceEdits() && m_plugins->sourceEdits()->target(ids.first());
+    const bool here = !going && store && !store->of(ids.first()).isIdentity();
     map.insert("kept", here ? QStringLiteral("here") : currentAdjustment(ids.first()).isIdentity() ? QString() : QStringLiteral("source"));
     return map;
 }
@@ -844,126 +850,46 @@ QJSValue PluginHost::turn(const QJSValue &photos, int quarters) {
     return applyAdjustments(targets);
 }
 
-// Where the source keeps edits (iCloud), there: each photo's original
-// fetched, then set_edit, one after another; the service reads the
-// library again once each is in. Where it keeps none (a folder), here
-// (AdjustmentStore). A promise of what was done: { photos: [{ id, turn,
+// Where the source keeps edits (iCloud), there (SourceEdits): drawn at
+// once, sent once the photo is left alone, a failure said as a notice of
+// this plugin's. Where it keeps none (a folder), here (AdjustmentStore).
+// A promise of what was done, as soon as it shows: { photos: [{ id, turn,
 // crop }], kept: "source" or "here" }.
 QJSValue PluginHost::applyAdjustments(const Adjustments &targets) {
     const int generation = m_generation;
     const Deferred deferred = defer([] {});
     AdjustmentStore *store = m_plugins->adjustments();
-    ServiceClient *service = m_plugins->service();
     const Library *data = m_plugins->libraryData();
     if (targets.isEmpty() || !store) {
         settle(generation, deferred.reject, error(QStringLiteral("not_found"), tr("no such photo")));
         return deferred.promise;
     }
-    // What was done to `ids`: { photos: [{ id, turn, crop }], kept }.
-    auto what = [targets](const QList<QByteArray> &ids, const QString &kept) {
-        QVariantList photos;
-        for (const QByteArray &id : ids) {
-            QVariantMap one = mapOf(targets.value(id));
-            one.insert("id", QString::fromUtf8(id));
-            photos.append(one);
-        }
-        return QVariantMap{{"photos", photos}, {"kept", kept}};
-    };
-    auto done = [this, generation, deferred, targets, what](const QString &kept) {
-        settle(generation, deferred.resolve, engine()->toScriptValue(what(targets.keys(), kept)));
+    QVariantList photos;
+    for (auto it = targets.begin(); it != targets.end(); ++it) {
+        QVariantMap one = mapOf(it.value());
+        one.insert("id", QString::fromUtf8(it.key()));
+        photos.append(one);
+    }
+    const auto done = [&](const QString &kept) {
+        settle(generation, deferred.resolve, engine()->toScriptValue(QVariantMap{{"photos", photos}, {"kept", kept}}));
+        return deferred.promise;
     };
     const QString source = data->source();
+    SourceEdits *edits = m_plugins->sourceEdits();
     // A library no source fills (pinhole-fake's), a folder's, or no
     // service: here.
-    if (!service || source.isEmpty() || source == QLatin1String("fake") || source.startsWith(QLatin1String("folder:"))) {
+    if (!edits || source.isEmpty() || source == QLatin1String("fake") || source.startsWith(QLatin1String("folder:"))) {
         if (!store->set(targets)) {
             settle(generation, deferred.reject, error(QStringLiteral("unavailable"), tr("could not keep the edit")));
             return deferred.promise;
         }
-        done(QStringLiteral("here"));
-        return deferred.promise;
+        return done(QStringLiteral("here"));
     }
-    // The edit each is shown with now, which its new one is made from: the
-    // source writes over no other (one made since on a device).
-    QHash<QByteArray, Adjustment> bases;
-    for (auto it = targets.begin(); it != targets.end(); ++it) {
-        const int at = m_plugins->library()->positionOf(QJSValue(QString::fromUtf8(it.key())));
-        if (at < 0) {
+    for (auto it = targets.begin(); it != targets.end(); ++it)
+        if (m_plugins->library()->positionOf(QJSValue(QString::fromUtf8(it.key()))) < 0) {
             settle(generation, deferred.reject, error(QStringLiteral("not_found"), tr("no such photo")));
             return deferred.promise;
         }
-        bases.insert(it.key(), data->at(at).sourceEdit);
-    }
-    auto left = std::make_shared<QList<QByteArray>>(targets.keys());
-    // Those in the source already: one that fails after them leaves them
-    // done, and says which (the error's `photos`), so they can be undone.
-    auto committed = std::make_shared<QList<QByteArray>>();
-    auto failed = [this, generation, deferred, store, committed, what](const QString &code, const QString &message) {
-        Adjustments none;
-        for (const QByteArray &id : std::as_const(*committed))
-            none.insert(id, Adjustment());
-        if (!none.isEmpty())
-            store->set(none);
-        QJSValue e = error(code.isEmpty() ? QStringLiteral("unavailable") : code, message);
-        if (QJSEngine *js = engine(); js && !committed->isEmpty()) {
-            const QVariantMap partly = what(*committed, QStringLiteral("source"));
-            e.setProperty("photos", js->toScriptValue(partly.value("photos")));
-            e.setProperty("kept", QStringLiteral("source"));
-        }
-        settle(generation, deferred.reject, e);
-    };
-    // Each photo after the one before: the step to the next is held by the
-    // answer it waits for, never by itself, so it is gone once all are.
-    auto next = std::make_shared<std::function<void()>>();
-    const std::weak_ptr<std::function<void()>> again = next;
-    const QPointer<PluginHost> alive(this);
-    *next = [=]() {
-        if (!alive)
-            return;
-        if (left->isEmpty()) {
-            // In the source now: nothing kept here for them any more.
-            Adjustments none;
-            for (auto it = targets.begin(); it != targets.end(); ++it)
-                none.insert(it.key(), Adjustment());
-            store->set(none);
-            return done(QStringLiteral("source"));
-        }
-        const auto self = again.lock();
-        const QByteArray id = left->takeFirst();
-        const Adjustment target = targets.value(id);
-        service->fetch(id, QStringLiteral("original"), [=](bool ok, const QJsonObject &result, const QString &code) {
-            if (!alive)
-                return;
-            if (!ok)
-                return failed(code, result.value("message").toString(code));
-            QJsonObject params{{"asset", QString::fromUtf8(id)}, {"original", result.value("path").toString()},
-                               {"source", source}};
-            if (!target.isIdentity()) {
-                params.insert("turn", target.turn);
-                params.insert("crop", QJsonArray{target.crop.x(), target.crop.y(), target.crop.width(), target.crop.height()});
-            }
-            const Adjustment base = bases.value(id);
-            params.insert("base", base.isIdentity() ? QJsonValue()
-                                                    : QJsonObject{{"turn", base.turn},
-                                                                  {"crop", QJsonArray{base.crop.x(), base.crop.y(), base.crop.width(),
-                                                                                      base.crop.height()}}});
-            service->call(QStringLiteral("set_edit"), params, [=](bool ok, const QJsonObject &answer, const QString &code) {
-                if (!alive)
-                    return;
-                // A source that keeps no edits (a provider's): all of
-                // them here.
-                if (!ok && code == QLatin1String("unsupported")) {
-                    if (!store->set(targets))
-                        return failed(QStringLiteral("unavailable"), tr("could not keep the edit"));
-                    return done(QStringLiteral("here"));
-                }
-                if (!ok)
-                    return failed(code, answer.value("message").toString(code));
-                committed->append(id);
-                (*self)();
-            });
-        }, false, source);
-    };
-    (*next)();
-    return deferred.promise;
+    edits->hold(targets, source, m_id);
+    return done(QStringLiteral("source"));
 }

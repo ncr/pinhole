@@ -75,9 +75,22 @@ bool Library::open(const QString &dir, QString *error) {
     return true;
 }
 
-void Library::applyAdjustments(const Adjustments &all) {
-    for (LibraryItem &item : m_items) {
-        item.adjust = all.value(item.id);
+std::vector<int> Library::applyAdjustments(const Adjustments &all, const Adjustments &pending) {
+    std::vector<int> changed;
+    for (size_t i = 0; i < m_items.size(); ++i) {
+        LibraryItem &item = m_items[i];
+        Adjustment adjust = all.value(item.id);
+        if (!pending.isEmpty())
+            if (const auto it = pending.constFind(item.id); it != pending.cend()) {
+                const int quarters = Adjustment::quartersBetween(item.sourceEdit, it.value());
+                adjust = Adjustment();
+                adjust.turn = std::max(0, quarters);
+            }
+        // Read with none, its size is its file's already.
+        if (adjust == item.adjust)
+            continue;
+        changed.push_back(int(i));
+        item.adjust = adjust;
         if (item.adjust.isIdentity() || !item.rawW || !item.rawH) {
             item.thumbW = item.rawW;
             item.thumbH = item.rawH;
@@ -87,4 +100,5 @@ void Library::applyAdjustments(const Adjustments &all) {
         item.thumbW = quint16(std::min(size.width(), 65535));
         item.thumbH = quint16(std::min(size.height(), 65535));
     }
+    return changed;
 }

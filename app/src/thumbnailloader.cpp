@@ -255,6 +255,34 @@ void ThumbnailLoader::reload(const std::function<void()> &swap) {
     m_paused = false;
 }
 
+void ThumbnailLoader::readjust(const std::function<std::vector<int>()> &change) {
+    std::unique_lock lock(m_mutex);
+    m_paused = true;
+    // A full photo given up on comes back null: not a failure, asked again.
+    const std::unordered_set<quint64> cut = m_inFlight;
+    m_giveUp = true;
+    m_idle.wait(lock, [this] { return m_inFlight.empty(); });
+    m_giveUp = false;
+    for (const quint64 key : cut) {
+        m_failed.erase(key);
+        if (isMediumKey(key))
+            m_mediumMissing.erase(keyIndex(key));
+    }
+    const std::vector<int> changed = change();
+    if (!changed.empty()) {
+        const std::unordered_set<int> photos(changed.begin(), changed.end());
+        // A photo's own pictures, decoded as it was: a mosaic page holds
+        // positions, and the grid builds those again itself.
+        const auto stale = [&photos](quint64 key) { return !isPageKey(key) && photos.count(keyIndex(key)); };
+        std::erase_if(m_ready, [&](const DecodedThumb &d) { return stale(d.key); });
+        std::erase_if(m_readyKeys, stale);
+        std::erase_if(m_failed, stale);
+    }
+    m_paused = false;
+    lock.unlock();
+    m_wake.notify_all();
+}
+
 size_t ThumbnailLoader::queued() {
     std::lock_guard lock(m_mutex);
     return m_queue.size();
