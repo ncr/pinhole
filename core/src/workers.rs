@@ -662,6 +662,7 @@ while IFS= read -r line; do
   case "$line" in
     *fail*) echo "{\"answer\":$id,\"error\":\"no such thing\"}" ;;
     *slow*) ;;
+    *long*) echo "{\"answer\":$id,\"result\":\"$(printf '%100000s' '' | tr ' ' x)\"}" ;;
     *) echo '{"event":"progress"}'; echo "{\"answer\":$id,\"result\":{\"asked\":$line}}" ;;
   esac
 done
@@ -685,6 +686,8 @@ done
         assert_eq!(asked.0.unwrap()["asked"]["request"], json!({"q": "cats"}));
         assert_eq!(asked.1.unwrap()["asked"]["request"], json!({"q": "dogs"}));
         assert_eq!(s.workers.ask("pinhole.search", "index", &json!({"q": "fail"}), wait), Err(("failed", "no such thing".to_owned())));
+        // An answer far longer than a line of the log: whole.
+        assert_eq!(s.workers.ask("pinhole.search", "index", &json!({"q": "long"}), wait).unwrap().as_str().map(str::len), Some(100_000));
         assert_eq!(s.workers.ask("pinhole.search", "index", &json!({"q": "slow"}), Duration::from_millis(300)).unwrap_err().0, "timeout");
         // Stopped while asked: answered so at once, not at the timeout.
         let started = Instant::now();

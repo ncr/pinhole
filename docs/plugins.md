@@ -536,7 +536,8 @@ when they change: read the file again when its modification time does
 pinholed (`nice`); lower it more, or its I/O, as it needs. Its stdout and
 stderr go into `~/.local/state/pinhole/pinholed.log`, each line after its
 plugin's id and name (at most 200 lines in ten seconds, 2,000 bytes a
-line, as a provider's). Read the library only: open `library.sqlite`
+line, as a provider's); its news and answers on stdout are read whole, up to
+4 MB a line. Read the library only: open `library.sqlite`
 read-only, and give up on a library whose `meta.source` is not
 `--library-key`.
 
@@ -595,7 +596,10 @@ pinholed writes each question to the worker's stdin as a line of JSON,
 `{"ask": 7, "request": {"text": "cats", "limit": 50}}`, the request as
 the QML gave it; the worker answers on its stdout with a line of its own,
 `{"answer": 7, "result": {"ids": [...]}}`, or `{"answer": 7, "error":
-"why"}`, in any order and while others wait (the `ask` number says which).
+"why"}`, in any order and while others wait (the `ask` number says which). Put
+`"answer"` first: an answer longer than 4 MB is not read, and the question
+whose number it starts with is answered with `failed` rather than left to
+time out.
 What it says otherwise is as before: its news, its log. The promise is of
 the `result`; rejected with `code` `failed` (its `error` the message),
 `timeout` (none in `timeout` ms, 30 s unless said), `paused` (background

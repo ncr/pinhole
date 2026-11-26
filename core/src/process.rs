@@ -524,6 +524,15 @@ fn short(text: &str, max: usize) -> &str {
     &text[..end]
 }
 
+/// The number of the answer a line starts with, `{"answer": 7, …`, even
+/// when the rest of it was too long to read.
+fn answer_number(start: &[u8]) -> Option<u64> {
+    let start = String::from_utf8_lossy(&start[..start.len().min(64)]);
+    let rest = start.trim_start().strip_prefix('{')?.trim_start().strip_prefix("\"answer\"")?.trim_start().strip_prefix(':')?.trim_start();
+    let digits = rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len());
+    rest[..digits].parse().ok()
+}
+
 /// One line into `buf`, without its newline: Some(true), or Some(false)
 /// when it is longer than `max` (then not all read); None at the end.
 fn read_line(reader: &mut impl BufRead, max: usize, buf: &mut Vec<u8>) -> std::io::Result<Option<bool>> {
@@ -579,30 +588,48 @@ fn log_stderr(plugin: &str, stderr: std::process::ChildStderr) {
 }
 
 pub(crate) fn log_lines(plugin: &str, from: impl Read, log: &mut impl Write) {
-    log_lines_telling(plugin, from, log, |_| {});
+    log_lines_up_to(plugin, from, log, LOG_LINE_MAX, |_| {});
 }
 
+/// The bytes of a line a log keeps.
+const LOG_LINE_MAX: usize = 2000;
+
+/// The longest line of a worker's stdout that is read whole: its answer to
+/// `ask` (500 photos found, a page of a catalog) or its news.
+pub(crate) const SAID_MAX: usize = 4 << 20;
+
 /// As `log_lines`, but a line that is a JSON object with an `"event"` (a
-/// worker's news for its plugin) goes to `tell` instead of the log.
-pub(crate) fn log_lines_telling(plugin: &str, from: impl Read, log: &mut impl Write, mut tell: impl FnMut(serde_json::Value)) {
+/// worker's news for its plugin) or an `"answer"` goes to `tell` instead of
+/// the log, read whole up to `SAID_MAX` bytes. An answer longer than that
+/// is told as an error, so whoever asked hears at once.
+pub(crate) fn log_lines_telling(plugin: &str, from: impl Read, log: &mut impl Write, tell: impl FnMut(serde_json::Value)) {
+    log_lines_up_to(plugin, from, log, SAID_MAX, tell);
+}
+
+fn log_lines_up_to(plugin: &str, from: impl Read, log: &mut impl Write, max: usize, mut tell: impl FnMut(serde_json::Value)) {
     let mut stderr = BufReader::new(from);
     let mut buf = Vec::new();
     let (mut since, mut said, mut left_out) = (Instant::now(), 0u32, 0u32);
     loop {
-        let line = match read_line(&mut stderr, 2000, &mut buf) {
+        let whole = match read_line(&mut stderr, max, &mut buf) {
             Ok(None) | Err(_) => break,
-            Ok(Some(true)) => String::from_utf8_lossy(&buf).into_owned(),
-            Ok(Some(false)) => {
-                // The rest of a long line, left out.
-                let text = String::from_utf8_lossy(&buf).into_owned();
-                if skip_line(&mut stderr).is_err() {
-                    break;
-                }
-                format!("{text}…")
-            }
+            Ok(Some(whole)) => whole,
         };
-        if line.trim_start().starts_with('{') {
-            if let Ok(said) = serde_json::from_str::<serde_json::Value>(line.trim()) {
+        if !whole {
+            // The rest of a long line, passed over.
+            if skip_line(&mut stderr).is_err() {
+                break;
+            }
+            if let Some(number) = answer_number(&buf) {
+                let mb = max as f64 / (1 << 20) as f64;
+                tell(serde_json::json!({"answer": number, "error": format!("{plugin} answered with a line of more than {mb} MB: left out")}));
+                let _ = writeln!(log, "pinholed: {plugin}: its answer {number} was longer than {mb} MB: answered with an error");
+                continue;
+            }
+        }
+        let text = String::from_utf8_lossy(&buf);
+        if whole && text.trim_start().starts_with('{') {
+            if let Ok(said) = serde_json::from_str::<serde_json::Value>(text.trim()) {
                 // News, or a worker's answer to what was asked of it.
                 if said.get("event").is_some_and(serde_json::Value::is_string) || said.get("answer").is_some_and(serde_json::Value::is_u64) {
                     tell(said);
@@ -610,6 +637,7 @@ pub(crate) fn log_lines_telling(plugin: &str, from: impl Read, log: &mut impl Wr
                 }
             }
         }
+        let line = if !whole || text.len() > LOG_LINE_MAX { format!("{}…", short(&text, LOG_LINE_MAX)) } else { text.into_owned() };
         if since.elapsed() >= Duration::from_secs(10) {
             if left_out > 0 {
                 let _ = writeln!(log, "pinholed: {plugin}: {left_out} lines of its log left out");
@@ -1905,6 +1933,32 @@ mod tests {
         assert_eq!(read_line(&mut reader, 10, &mut buf).unwrap(), Some(true));
         assert_eq!(buf, b"exactly10!");
         assert_eq!(read_line(&mut reader, 10, &mut buf).unwrap(), Some(false));
+    }
+
+    #[test]
+    fn a_workers_answer_is_read_whole_and_one_too_long_is_answered_with_an_error() {
+        // 500 photos found: far longer than a line of the log.
+        let ids: Vec<String> = (0..500).map(|i| format!("icloud:{i:040}")).collect();
+        let answer = serde_json::json!({"answer": 7, "result": {"ids": ids}});
+        let mut text = format!("{answer}\n").into_bytes();
+        assert!(text.len() > 20_000);
+        text.extend_from_slice(b"{\"answer\": 8, \"result\": \"");
+        text.extend(std::iter::repeat_n(b'x', 50_000));
+        text.extend_from_slice(b"\"}\nplain\n");
+        let (mut log, mut told) = (Vec::new(), Vec::new());
+        log_lines_up_to("p", BufReader::with_capacity(64, &text[..]), &mut log, 40_000, |said| told.push(said));
+        assert_eq!(told.len(), 2, "{told:?}");
+        assert_eq!(told[0], answer);
+        assert_eq!(told[1]["answer"], 8);
+        assert!(told[1]["error"].as_str().unwrap().contains("more than"), "{}", told[1]);
+        let log = String::from_utf8(log).unwrap();
+        assert!(log.ends_with("pinholed: p: plain\n"), "{log}");
+        assert_eq!(answer_number(br#"  { "answer" :12, "res"#), Some(12));
+        assert_eq!(answer_number(br#"{"result": {"answer": 3"#), None);
+        // At the real limit, what a worker writes as one line arrives.
+        let mut told = Vec::new();
+        log_lines_telling("p", &format!("{answer}\n").into_bytes()[..], &mut Vec::new(), |said| told.push(said));
+        assert_eq!(told, [answer]);
     }
 
     #[test]
