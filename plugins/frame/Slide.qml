@@ -138,9 +138,9 @@ Item {
     // than three quarters of the size the slide shows it at (a 2048 px
     // medium on a 2× screen, not on a 1× one). Decoded at the size it is
     // shown at its closest, by Pinhole's own decoder, as it is mostly HEIC.
-    // Not for a video, whose frames are the medium's size.
-    readonly property size shownSize: Qt.size(Math.ceil(photo.width * zoomMax * Screen.devicePixelRatio),
-                                              Math.ceil(photo.height * zoomMax * Screen.devicePixelRatio))
+    // Not for a video, whose frames are the medium's size. In points: Qt
+    // asks a sourceSize times the screen's ratio.
+    readonly property size shownSize: Qt.size(Math.ceil(photo.width * zoomMax), Math.ceil(photo.height * zoomMax))
     readonly property bool wantsFull: sharpImage.status === Image.Ready && item !== null && !item.video
                                       && Math.max(sharpImage.implicitWidth, sharpImage.implicitHeight)
                                          < 0.75 * Math.max(photo.width, photo.height) * Screen.devicePixelRatio

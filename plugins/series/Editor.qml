@@ -410,7 +410,7 @@ Item {
                 Image {
                     anchors.fill: parent
                     source: tile.modelData.thumbnail
-                    sourceSize.height: Math.min(480, Math.ceil(carousel.tall * Screen.devicePixelRatio))
+                    sourceSize.height: Math.min(480 / Screen.devicePixelRatio, Math.ceil(carousel.tall))
                     fillMode: Image.PreserveAspectCrop
                     asynchronous: true
                 }
@@ -418,7 +418,7 @@ Item {
                     anchors.fill: parent
                     visible: tile.large
                     source: tile.large ? editor.sharp[tile.modelData.id] || "" : ""
-                    sourceSize.height: Math.ceil(carousel.tall * Screen.devicePixelRatio)
+                    sourceSize.height: Math.ceil(carousel.tall)
                     fillMode: Image.PreserveAspectCrop
                     asynchronous: true
                     opacity: status === Image.Ready ? 1 : 0
@@ -509,7 +509,7 @@ Item {
             Image {
                 anchors.fill: parent
                 source: closeUp.tile ? editor.sharp[closeUp.tile.id] || "" : ""
-                sourceSize.height: Math.ceil(height * Screen.devicePixelRatio)
+                sourceSize.height: Math.ceil(height)
                 fillMode: Image.PreserveAspectCrop
                 asynchronous: true
                 opacity: status === Image.Ready ? 1 : 0

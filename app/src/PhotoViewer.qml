@@ -41,7 +41,11 @@ Item {
     readonly property VideoView videoView: videoOutput
     readonly property bool videoShown: viewer.video && videoPlayer.playbackState !== MediaPlayer.StoppedState
     readonly property var sharpest: {
-        const of = (image, mipmap) => ({ source: image.source, size: Qt.size(image.implicitWidth, image.implicitHeight),
+        // Its size in pixels, as decoded: an Image's implicit size is in
+        // points, and Qt asks a sourceSize times the screen's ratio.
+        const of = (image, mipmap) => ({ source: image.source,
+                                         size: Qt.size(Math.round(image.implicitWidth * Screen.devicePixelRatio),
+                                                       Math.round(image.implicitHeight * Screen.devicePixelRatio)),
                                          mipmap: mipmap })
         if (detailImage.status === Image.Ready && detailImage.opacity >= 1)
             return of(detailImage, true)
@@ -211,7 +215,7 @@ Item {
                 source: parent.visible ? (viewer.revision, viewer.imageFor(parent.at)) : ""
                 fillMode: Image.PreserveAspectCrop
                 asynchronous: true
-                sourceSize: Qt.size(root.width * Screen.devicePixelRatio, root.height * Screen.devicePixelRatio)
+                sourceSize: Qt.size(root.width, root.height)
             }
         }
     }
@@ -249,7 +253,7 @@ Item {
             source: (viewer.revision, viewer.imageFor(viewer.index))
             fillMode: Image.PreserveAspectCrop
             asynchronous: true
-            sourceSize: Qt.size(root.width * Screen.devicePixelRatio, root.height * Screen.devicePixelRatio)
+            sourceSize: Qt.size(root.width, root.height)
             visible: !root.staged
         }
         Image {
@@ -257,18 +261,22 @@ Item {
             anchors.fill: parent
             fillMode: Image.PreserveAspectCrop
             asynchronous: true
-            sourceSize: Qt.size(root.width * Screen.devicePixelRatio, root.height * Screen.devicePixelRatio)
+            sourceSize: Qt.size(root.width, root.height)
             opacity: status === Image.Ready ? 1 : 0
             Behavior on opacity { NumberAnimation { duration: 120 } }
             visible: !root.staged
         }
         // Zoomed in: the original at its full size, decoded once it is
-        // wanted, so detail holds up close.
+        // wanted, so detail holds up close. At most 8192 pixels a side: a
+        // 100 MP panorama whole is a 400 MB texture, and with the search
+        // model loaded on a 16 GB Mac the card had no room left for the
+        // window, which went down.
         Image {
             id: detailImage
             anchors.fill: parent
             fillMode: Image.PreserveAspectCrop
             asynchronous: true
+            sourceSize: Qt.size(8192 / Screen.devicePixelRatio, 8192 / Screen.devicePixelRatio)
             mipmap: true
             opacity: status === Image.Ready ? 1 : 0
             Behavior on opacity { NumberAnimation { duration: 120 } }

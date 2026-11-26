@@ -1224,7 +1224,7 @@ Item {
                                 anchors.centerIn: parent
                                 width: Math.round(parent.width * 0.9)
                                 height: width
-                                sourceSize: Qt.size(width * Screen.devicePixelRatio, height * Screen.devicePixelRatio)
+                                sourceSize: Qt.size(width, height)
                                 source: "image://mark/" + encodeURIComponent(markRow.modelData.icon)
                             }
                         }

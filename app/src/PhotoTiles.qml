@@ -96,7 +96,7 @@ FocusScope {
                 Image {
                     anchors.fill: parent
                     source: tile.item.thumbnail || ""
-                    sourceSize: Qt.size(width * Screen.devicePixelRatio, height * Screen.devicePixelRatio)
+                    sourceSize: Qt.size(width, height)
                     fillMode: Image.PreserveAspectCrop
                     asynchronous: true
                 }

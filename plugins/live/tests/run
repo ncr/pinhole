@@ -10,8 +10,10 @@ trap 'rm -rf -- "$top"' EXIT
 dir="$top/Photos, 50%d [old]; 'x'"
 mkdir -p "$dir"
 motion="$dir/IMG 50%off [1].MOV"
-ffmpeg -v error -nostdin -y -f lavfi -i color=c=gray:s=160x120:d=1:r=30 \
-    -vf 'drawbox=x=t*120:y=40:w=30:h=30:c=white:t=fill' -c:v libx264 -pix_fmt yuv420p "$motion"
+# A white square crossing it: overlaid, as drawbox no longer moves with
+# t (ffmpeg 9).
+ffmpeg -v error -nostdin -y -f lavfi -i color=c=gray:s=160x120:d=1:r=30 -f lavfi -i color=c=white:s=30x30:d=1:r=30 \
+    -filter_complex 'overlay=x=t*120:y=40:shortest=1' -c:v libx264 -pix_fmt yuv420p "$motion"
 frames() {
     ffprobe -v error -count_packets -select_streams v:0 -show_entries stream=nb_read_packets -of csv=p=0 "$1" | tr -cd '0-9'
 }

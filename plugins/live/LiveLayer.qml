@@ -246,7 +246,7 @@ Item {
         source: photoLayer.original
         fillMode: Image.PreserveAspectCrop
         asynchronous: true
-        sourceSize: Qt.size(photoLayer.Window.width * Screen.devicePixelRatio, photoLayer.Window.height * Screen.devicePixelRatio)
+        sourceSize: Qt.size(photoLayer.Window.width, photoLayer.Window.height)
         opacity: status === Image.Ready ? 1 : 0
         Behavior on opacity { NumberAnimation { duration: 120 } }
     }
@@ -268,7 +268,7 @@ Item {
         source: photoLayer.effect === "long_exposure" ? photoLayer.longExposure : ""
         fillMode: Image.PreserveAspectCrop
         asynchronous: true
-        sourceSize: Qt.size(photoLayer.Window.width * Screen.devicePixelRatio, photoLayer.Window.height * Screen.devicePixelRatio)
+        sourceSize: Qt.size(photoLayer.Window.width, photoLayer.Window.height)
         opacity: status === Image.Ready ? 1 : 0
         Behavior on opacity { NumberAnimation { duration: 120 } }
     }

@@ -356,8 +356,8 @@ Item {
                         Image {
                             anchors.fill: parent
                             source: pinhole.library.item(tile.modelData).thumbnail ?? ""
-                            sourceSize.width: days.cell * Screen.devicePixelRatio
-                            sourceSize.height: days.cell * Screen.devicePixelRatio
+                            sourceSize.width: days.cell
+                            sourceSize.height: days.cell
                             fillMode: Image.PreserveAspectCrop
                             asynchronous: true
                             opacity: status === Image.Ready ? 1 : 0

@@ -63,7 +63,7 @@ Item {
             x: placed(side / 2 - centreX * width, width)
             y: placed(side / 2 - centreY * height, height)
             source: photo.thumbnailAsIs || photo.thumbnail || ""
-            sourceSize: Qt.size(Math.min(1024, width * Screen.devicePixelRatio), Math.min(1024, height * Screen.devicePixelRatio))
+            sourceSize: Qt.size(Math.min(1024 / Screen.devicePixelRatio, width), Math.min(1024 / Screen.devicePixelRatio, height))
             asynchronous: true
             smooth: true
         }

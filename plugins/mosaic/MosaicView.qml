@@ -602,7 +602,7 @@ Item {
                 visible: false
                 source: mosaic.sharp !== "" ? mosaic.sharp : mosaic.item ? mosaic.item.thumbnail : ""
                 // As large as its room, whatever the tiles' size: asked for once.
-                    sourceSize: Qt.size(Math.round(stage.width * Screen.devicePixelRatio), Math.round(stage.height * Screen.devicePixelRatio))
+                    sourceSize: Qt.size(Math.round(stage.width), Math.round(stage.height))
                 asynchronous: true
                 mipmap: true
                 // The thumbnail stays until the sharper one is in.
@@ -792,7 +792,7 @@ Item {
                     anchors.fill: parent
                     anchors.margins: 2
                     source: loupe.item ? loupe.item.thumbnail : ""
-                    sourceSize: Qt.size(Math.round(width * Screen.devicePixelRatio), Math.round(height * Screen.devicePixelRatio))
+                    sourceSize: Qt.size(Math.round(width), Math.round(height))
                     fillMode: Image.PreserveAspectCrop
                     asynchronous: true
                 }
@@ -843,7 +843,7 @@ Item {
                     Image {
                         anchors.fill: parent
                         source: offer.item ? offer.item.thumbnail : ""
-                        sourceSize: Qt.size(Math.round(width * Screen.devicePixelRatio), Math.round(height * Screen.devicePixelRatio))
+                        sourceSize: Qt.size(Math.round(width), Math.round(height))
                         fillMode: Image.PreserveAspectCrop
                         asynchronous: true
                     }

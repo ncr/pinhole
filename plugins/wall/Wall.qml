@@ -146,8 +146,7 @@ Item {
                         anchors.margins: face.border.width
                         source: cell.item ? cell.item.thumbnail : ""
                         // Sharp enough to be looked at close up.
-                        sourceSize: Qt.size(Math.round(wall.tile * 2.2 * Screen.devicePixelRatio),
-                                            Math.round(wall.tile * 2.2 * Screen.devicePixelRatio))
+                        sourceSize: Qt.size(Math.round(wall.tile * 2.2), Math.round(wall.tile * 2.2))
                         fillMode: Image.PreserveAspectCrop
                         asynchronous: true
                         opacity: status === Image.Ready ? 1 : 0

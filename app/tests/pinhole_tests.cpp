@@ -2409,6 +2409,12 @@ QtObject {
         picture.fill(Qt::red);
         QVERIFY(picture.save(dir.path() + "/a.jpg", "JPEG"));
         QCOMPARE(decodePhoto(dir.path() + "/a.jpg", QSize(200, 200)).size(), QSize(200, 150));
+        // A tall panorama within a square (the viewer's zoomed full size,
+        // 8192 a side at most): its long side fits, never the short one.
+        QImage tall(300, 1000, QImage::Format_RGB32);
+        tall.fill(Qt::red);
+        QVERIFY(tall.save(dir.path() + "/tall.jpg", "JPEG"));
+        QCOMPARE(decodePhoto(dir.path() + "/tall.jpg", QSize(200, 200)).size(), QSize(60, 200));
         std::atomic<bool> dropped{true};
         QVERIFY(decodePhoto(dir.path() + "/a.jpg", QSize(200, 200), &dropped).isNull());
     }
