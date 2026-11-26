@@ -474,6 +474,14 @@ class Worker:
                 self.running = False
 
 
+def shown(worker):
+    """What the window shows of the worker besides its counts: told as it
+    changes (a "progress" line, which has Pinhole ask for the status), as
+    no photo indexed says it when the catalog is read, or indexing waits
+    for the person to step away or for the card."""
+    return (worker.catalog_ready, worker.running, worker.running and worker.yielding, worker.waiting)
+
+
 def answer(worker, line):
     """One of pinholed's questions, {"ask": n, "request": {...}}, answered
     on stdout with its number: {"answer": n, "result": ...} or "error"."""
@@ -533,7 +541,12 @@ def serve(args):
                 from .away import Away
                 away = Away()
                 asked = bytearray()
+                told = shown(worker)
                 while not stopping:
+                    now = shown(worker)
+                    if now != told:
+                        told = now
+                        print(json.dumps({"event": "progress"}), flush=True)
                     if catalog is not None:
                         # pinholed's questions (pinhole.ask), a line each;
                         # its stdin closed, the end.

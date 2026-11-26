@@ -1,4 +1,5 @@
 """Read-only catalog updates for the daemon-owned search worker."""
+import importlib.util
 import json
 import os
 import socket
@@ -135,3 +136,23 @@ class ServiceManagesTests(unittest.TestCase):
                 self.assertFalse(service_manages(Path('/x'), 'folder:/p'))
             finally:
                 os.environ.pop('PINHOLE_SOCKET') if old is None else os.environ.update(PINHOLE_SOCKET=old)
+
+
+@unittest.skipUnless(importlib.util.find_spec('numpy'), 'needs numpy')
+class ShownTests(unittest.TestCase):
+    def test_reading_the_catalog_and_waiting_for_the_person_change_what_is_shown(self):
+        # No photo indexed says either: Pinhole's window, told nothing else,
+        # would read "Reading the library…" or count on, still.
+        from photo_search.worker import shown
+        worker = SimpleNamespace(catalog_ready=False, running=False, yielding=False, waiting=False)
+        started = shown(worker)
+        worker.catalog_ready = worker.running = True
+        read = shown(worker)
+        self.assertNotEqual(read, started)
+        worker.yielding = True
+        self.assertNotEqual(shown(worker), read)
+        # Yielding while stopped is not shown (status says so too).
+        worker.running = False
+        stopped = shown(worker)
+        worker.yielding = False
+        self.assertEqual(shown(worker), stopped)
