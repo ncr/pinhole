@@ -1,8 +1,8 @@
 # Pinhole's plugins
 
 Every plugin is one key away. They go from the ones I use every day to the ones that exist because I could
-imagine them. Each clip below is the real application, recorded on a library of a thousand of my photos with
-no people in them.
+imagine them. Each clip below is the real application, recorded on a library of a thousand of my photos where
+the only face is mine.
 
 <img src="../readme/plugins.svg" alt="Plugins, from useful every day to imagined it, so I built it: Favourites F, Turn and crop R K, Info I, Send to phone O, Screenshots ⇧ S, Search Ctrl F, People ⇧ F, Live Photos L, Map M, On this day D, Series G, Contact sheet K, Year calendar Y, Photo frame P, Background B, Theme T, Rainbow wall W, Mosaic H" width="100%">
 
@@ -22,7 +22,7 @@ no people in them.
 <img src="screenshots.webp" alt="Screenshots at work in Pinhole" width="100%">
 
 <img src="search.svg" alt="Search, Ctrl F: Describe a photo in your own words, and it comes first." width="100%">
-<img src="coming.svg" alt="A clip of this plugin is still to be recorded" width="100%">
+<img src="search.webp" alt="Search at work in Pinhole" width="100%">
 
 <img src="people.svg" alt="People, ⇧ F: Faces grouped by person. Name them once, and your other computers know them too." width="100%">
 <img src="people.webp" alt="People at work in Pinhole" width="100%">

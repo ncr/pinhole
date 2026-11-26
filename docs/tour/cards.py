@@ -43,8 +43,8 @@ LINES = {
 INTRO = """# Pinhole's plugins
 
 Every plugin is one key away. They go from the ones I use every day to the ones that exist because I could
-imagine them. Each clip below is the real application, recorded on a library of a thousand of my photos with
-no people in them.
+imagine them. Each clip below is the real application, recorded on a library of a thousand of my photos where
+the only face is mine.
 
 <img src="../readme/plugins.svg" alt="{alt}" width="100%">
 """
