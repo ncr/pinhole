@@ -4,7 +4,7 @@ Every plugin is one key away. They go from the ones I use every day to the ones 
 imagine them. Each clip below is the real application, recorded on a library of a thousand of my photos where
 the only face is mine.
 
-<img src="../readme/plugins.svg" alt="Plugins, from useful every day to imagined it, so I built it: Favourites F, Turn and crop R K, Info I, Send to phone O, Screenshots ⇧ S, Search Ctrl F, People ⇧ F, Live Photos L, Map M, On this day D, Series G, Contact sheet K, Year calendar Y, Photo frame P, Background B, Theme T, Rainbow wall W, Mosaic H" width="100%">
+<img src="../readme/plugins.svg" alt="Plugins, from useful every day to imagined it, so I built it: Favourites F, Turn and crop R K, Info I, Send to phone O, Screenshots ⇧ S, Photos of screens ⇧ D, Search Ctrl F, People ⇧ F, Live Photos L, Map M, On this day D, Series G, Contact sheet K, Year calendar Y, Photo frame P, Background B, Theme T, Rainbow wall W, Mosaic H" width="100%">
 
 <img src="favourites.svg" alt="Favourites, F: A heart on the photos you love, the same one your iPhone shows." width="100%">
 <img src="favourites.webp" alt="Favourites at work in Pinhole" width="100%">
@@ -20,6 +20,9 @@ the only face is mine.
 
 <img src="screenshots.svg" alt="Screenshots, ⇧ S: Screenshots folded into one card a day, or out of the grid altogether." width="100%">
 <img src="screenshots.webp" alt="Screenshots at work in Pinhole" width="100%">
+
+<img src="photos-of-screens.svg" alt="Photos of screens, ⇧ D: Photos you took of a TV, a monitor or a machine's display, found and shown together." width="100%">
+<img src="photos-of-screens.webp" alt="Photos of screens at work in Pinhole" width="100%">
 
 <img src="search.svg" alt="Search, Ctrl F: Describe a photo in your own words, and it comes first." width="100%">
 <img src="search.webp" alt="Search at work in Pinhole" width="100%">

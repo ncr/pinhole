@@ -25,6 +25,7 @@ LINES = {
     "Info": "When a photo was taken, with which camera and settings, and where.",
     "Send to phone": "Sends photos to a phone or computer nearby that has LocalSend open.",
     "Screenshots": "Screenshots folded into one card a day, or out of the grid altogether.",
+    "Photos of screens": "Photos you took of a TV, a monitor or a machine's display, found and shown together.",
     "Search": "Describe a photo in your own words, and it comes first.",
     "People": "Faces grouped by person. Name them once, and your other computers know them too.",
     "Live Photos": "A Live Photo moves, and plays as a loop, a bounce or a long exposure.",
